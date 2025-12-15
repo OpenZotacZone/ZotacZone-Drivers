@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
-* HID driver for ZOTAC Gaming Zone Controller - RGB LED control
-*
-* Copyright (c) 2025 Luke D. Jones <luke@ljones.dev>
-*/
+ * HID driver for ZOTAC Gaming Zone Controller - Config
+ *
+ * Copyright (c) 2025 Luke D. Jones <luke@ljones.dev>
+ */
 
 #include "asm-generic/errno-base.h"
 #include "linux/kstrtox.h"
@@ -30,12 +30,8 @@
 #define HEADER_TAG 0xE1
 #define PAYLOAD_SIZE 0x3C
 
-/*
- * Button mapping structure indices (relative to data buffer)
- * The data buffer is copied to the correct location in the HID report.
- */
 #define HEADER_LEN 5
-#define BTN_MAP_SOURCE_IDX (0x05 - HEADER_LEN) /* Source button ID */
+#define BTN_MAP_SOURCE_IDX (0x05 - HEADER_LEN)
 #define BTN_MAP_GAMEPAD_START_IDX (0x06 - HEADER_LEN)
 #define BTN_MAP_GAMEPAD_SIZE 4
 #define BTN_MAP_MODIFIER_IDX (0x0A - HEADER_LEN)
@@ -44,24 +40,15 @@
 #define BTN_MAP_MOUSE_IDX (0x12 - HEADER_LEN)
 #define BTN_MAP_RESPONSE_MIN_SIZE 14
 
-#define GAMEPAD_DPAD_STICK_IDX 0 /* DPad, Stick buttons */
-#define GAMEPAD_FACE_BUMPER_IDX 1 /* Face buttons, Bumpers */
-#define GAMEPAD_TRIGGER_IDX 2 /* Triggers */
-#define GAMEPAD_RESERVED_IDX 3 /* Reserved/unused */
-/*
- * Note: The above indices are relative to our data buffer, not the full protocol packet.
- * In the full protocol packet (as described in documentation), these fields would be
- * at different positions due to the packet header.
- *
- * For example, BTN_MAP_MOUSE_IDX (13 in our buffer) corresponds to offset 0x12-0x13
- * in the full protocol packet.
- */
+#define GAMEPAD_DPAD_STICK_IDX 0
+#define GAMEPAD_FACE_BUMPER_IDX 1
+#define GAMEPAD_TRIGGER_IDX 2
+#define GAMEPAD_RESERVED_IDX 3
 
-/* Mouse speed constants */
 #define CMD_SET_MOUSE_SPEED 0xA3
 #define CMD_GET_MOUSE_SPEED 0xA4
-#define MOUSE_SPEED_MIN 0x01 /* Slow */
-#define MOUSE_SPEED_MAX 0x0A /* Fast */
+#define MOUSE_SPEED_MIN 0x01
+#define MOUSE_SPEED_MAX 0x0A
 
 #define STICK_SENSITIVITY_NUM_IDX 0
 #define STICK_SENSITIVITY_DATA_IDX 1
@@ -106,7 +93,6 @@
 #define PROFILE_DEFAULT 0x00
 #define PROFILE_SECONDARY 0x01
 
-/* Button bit positions within the turbo byte */
 #define A_BTN_POS 0
 #define B_BTN_POS 1
 #define X_BTN_POS 2
@@ -116,7 +102,6 @@
 #define LT_BTN_POS 6
 #define RT_BTN_POS 7
 
-/* Button ID definitions */
 #define BUTTON_NONE 0x00
 #define BUTTON_M1 0x01
 #define BUTTON_M2 0x02
@@ -143,7 +128,6 @@
 #define BUTTON_LS 0x17
 #define BUTTON_RS 0x18
 
-/* Modifier key definitions */
 #define MOD_NONE 0x00
 #define MOD_LEFT_CTRL 0x01
 #define MOD_LEFT_SHIFT 0x02
@@ -157,23 +141,21 @@
 int zotac_cfg_refresh(struct zotac_device *zotac);
 
 struct button_directory {
-	const char *name; /* Directory name (e.g., "btn_a") */
-	u8 button_id; /* Associated button ID */
-	bool has_turbo; /* Whether this button supports turbo */
+	const char *name;
+	u8 button_id;
+	bool has_turbo;
 	struct kobject *
-		kobj; /* kobject for this directory (filled during registration) */
-	struct attribute_group *main_group; /* Main button attributes */
-	struct attribute_group *remap_group; /* Remap subdirectory attributes */
+	kobj;
+	struct attribute_group *main_group;
+	struct attribute_group *remap_group;
 };
 
-/* Structure to map button names to their byte and bit positions */
 struct button_mapping_entry {
 	const char *name;
 	u8 byte_index;
 	u8 bit_mask;
 };
 
-/* Define all supported buttons with their byte index and bit mask */
 static const struct button_mapping_entry button_map[] = {
 	{ "dpad_up", 0, 0x01 },
 	{ "dpad_down", 0, 0x02 },
@@ -189,7 +171,7 @@ static const struct button_mapping_entry button_map[] = {
 	{ "y", 1, 0x80 },
 	{ "lt", 2, 0x01 },
 	{ "rt", 2, 0x02 },
-	{ NULL, 0, 0 } /* Terminator */
+	{ NULL, 0, 0 }
 };
 
 static const struct {
@@ -228,7 +210,6 @@ static const struct {
 	{ "right_win", MOD_RIGHT_WIN },
 };
 
-/* Keyboard key definitions */
 struct key_name_mapping {
 	const char *name;
 	u8 keycode;
@@ -270,7 +251,6 @@ static const struct key_name_mapping keyboard_keys[] = {
 	{ "application", 0x65 }
 };
 
-/* Mouse button definitions */
 #define MOUSE_LEFT 0x01
 #define MOUSE_RIGHT 0x02
 #define MOUSE_MIDDLE 0x04
@@ -302,6 +282,23 @@ struct zotac_device_info {
 	} hw_version;
 };
 
+/* Dial Config Mapping */
+static const struct {
+	const char *name;
+	enum zotac_dial_function func;
+} dial_func_names[] = {
+	{ "scroll", DIAL_SCROLL },
+	{ "scroll_inverted", DIAL_SCROLL_INV },
+	{ "scroll_horizontal", DIAL_SCROLL_H },
+	{ "volume", DIAL_VOLUME },
+	{ "brightness", DIAL_BRIGHTNESS },
+	{ "arrows_vertical", DIAL_ARROWS_V },
+	{ "arrows_horizontal", DIAL_ARROWS_H },
+	{ "media", DIAL_MEDIA },
+	{ "page_scroll", DIAL_PAGE_SCROLL },
+	{ "zoom", DIAL_ZOOM },
+};
+
 static u16 zotac_calc_crc(u8 *data)
 {
 	const int payload_end = 0x3D;
@@ -318,18 +315,18 @@ static u16 zotac_calc_crc(u8 *data)
 		h4 = h3 >> 4;
 
 		crc = (u16)((((((h3 << 1) ^ h4) << 4) ^ h2) << 3) ^ h4 ^
-			    (crc >> 8));
+		(crc >> 8));
 	}
 
 	return crc;
 }
 
 static int zotac_send_command_and_get_response_usb(struct hid_device *hdev,
-						   u8 *send_buf, int send_len,
-						   u8 *recv_buf, int recv_len)
+												   u8 *send_buf, int send_len,
+												   u8 *recv_buf, int recv_len)
 {
 	struct usb_device *udev =
-		interface_to_usbdev(to_usb_interface(hdev->dev.parent));
+	interface_to_usbdev(to_usb_interface(hdev->dev.parent));
 	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
 	const int polling_interval_ms = 50;
 	int actual_length = 0;
@@ -346,7 +343,7 @@ static int zotac_send_command_and_get_response_usb(struct hid_device *hdev,
 	pipe_in = usb_rcvintpipe(udev, 0x84);
 
 	ret = usb_interrupt_msg(udev, pipe_out, send_buf, send_len,
-				&actual_length, 1000);
+							&actual_length, 1000);
 	if (ret < 0) {
 		hid_err(hdev, "Failed to send USB command: %d\n", ret);
 		return ret;
@@ -354,7 +351,7 @@ static int zotac_send_command_and_get_response_usb(struct hid_device *hdev,
 
 	memset(recv_buf, 0, recv_len);
 	ret = usb_interrupt_msg(udev, pipe_in, recv_buf, recv_len,
-				&actual_length, polling_interval_ms);
+							&actual_length, polling_interval_ms);
 	if (ret == 0 && actual_length > 0) {
 		return actual_length;
 	}
@@ -364,8 +361,8 @@ static int zotac_send_command_and_get_response_usb(struct hid_device *hdev,
 }
 
 static int zotac_send_command_raw(struct zotac_device *zotac, u8 cmd_code,
-				  u8 setting, const u8 *data, size_t data_len,
-				  u8 *response_buffer, size_t *response_len)
+								  u8 setting, const u8 *data, size_t data_len,
+								  u8 *response_buffer, size_t *response_len)
 {
 	bool is_cmd = (cmd_code == CMD_SET_RGB || cmd_code == CMD_GET_RGB);
 	int reply_len, result = -EIO;
@@ -426,14 +423,14 @@ static int zotac_send_command_raw(struct zotac_device *zotac, u8 cmd_code,
 			result = 0;
 		} else {
 			hid_err(zotac->hdev,
-				"Command mismatch in response: expected 0x%02x, got 0x%02x\n",
-				cmd_code, response_buffer[COMMAND_POS]);
+					"Command mismatch in response: expected 0x%02x, got 0x%02x\n",
+		   cmd_code, response_buffer[COMMAND_POS]);
 			result = -EIO;
 		}
 	} else {
 		hid_err(zotac->hdev,
-			"No response received for command 0x%02x: %d\n",
-			cmd_code, reply_len);
+				"No response received for command 0x%02x: %d\n",
+		  cmd_code, reply_len);
 		result = reply_len < 0 ? reply_len : -EIO;
 	}
 
@@ -444,11 +441,11 @@ static int zotac_send_command_raw(struct zotac_device *zotac, u8 cmd_code,
 }
 
 int zotac_send_get_command(struct zotac_device *zotac, u8 cmd_code, u8 setting,
-			   const u8 *req_data, size_t req_data_len,
-			   u8 *output_data, size_t *output_len)
+						   const u8 *req_data, size_t req_data_len,
+						   u8 *output_data, size_t *output_len)
 {
 	bool is_status_offset =
-		(cmd_code == CMD_SET_RGB || cmd_code == CMD_SET_BUTTON_MAPPING);
+	(cmd_code == CMD_SET_RGB || cmd_code == CMD_SET_BUTTON_MAPPING);
 	size_t response_size = REPORT_SIZE, available, to_copy;
 	int data_offset, ret;
 	u8 *response_buffer;
@@ -458,39 +455,39 @@ int zotac_send_get_command(struct zotac_device *zotac, u8 cmd_code, u8 setting,
 		return -ENOMEM;
 
 	ret = zotac_send_command_raw(zotac, cmd_code, setting, req_data,
-				     req_data_len, response_buffer,
-				     &response_size);
+								 req_data_len, response_buffer,
+							  &response_size);
 	if (ret < 0) {
 		kfree(response_buffer);
 		return ret;
 	}
 
 	if (response_size <= COMMAND_POS ||
-	    response_buffer[COMMAND_POS] != cmd_code) {
+		response_buffer[COMMAND_POS] != cmd_code) {
 		kfree(response_buffer);
-		return -EIO;
-	}
+	return -EIO;
+		}
 
-	data_offset = is_status_offset ? 7 : 5;
+		data_offset = is_status_offset ? 7 : 5;
 
-	if (output_data && output_len && *output_len > 0 &&
-	    response_size > data_offset) {
-		available = response_size - data_offset;
+		if (output_data && output_len && *output_len > 0 &&
+			response_size > data_offset) {
+			available = response_size - data_offset;
 		to_copy = min_t(size_t, available, *output_len);
 
 		memcpy(output_data, &response_buffer[data_offset], to_copy);
 		*output_len = to_copy;
-	}
+			}
 
-	kfree(response_buffer);
-	return 0;
+			kfree(response_buffer);
+			return 0;
 }
 
 int zotac_send_set_command(struct zotac_device *zotac, u8 cmd_code, u8 setting,
-			   const u8 *data, size_t data_len)
+						   const u8 *data, size_t data_len)
 {
 	bool is_status_offset =
-		(cmd_code == CMD_SET_RGB || cmd_code == CMD_SET_BUTTON_MAPPING);
+	(cmd_code == CMD_SET_RGB || cmd_code == CMD_SET_BUTTON_MAPPING);
 	size_t response_size = REPORT_SIZE;
 
 	int ret, status_offset;
@@ -499,54 +496,54 @@ int zotac_send_set_command(struct zotac_device *zotac, u8 cmd_code, u8 setting,
 	response_buffer = kzalloc(REPORT_SIZE, GFP_KERNEL);
 	if (!response_buffer) {
 		hid_err(zotac->hdev,
-			"SET_COMMAND: Failed to allocate response buffer");
+				"SET_COMMAND: Failed to allocate response buffer");
 		return -ENOMEM;
 	}
 
 	ret = zotac_send_command_raw(zotac, cmd_code, setting, data, data_len,
-				     response_buffer, &response_size);
+								 response_buffer, &response_size);
 
 	if (ret < 0) {
 		hid_err(zotac->hdev,
-			"SET_COMMAND: Command failed with error %d", ret);
+				"SET_COMMAND: Command failed with error %d", ret);
 		kfree(response_buffer);
 		return ret;
 	}
 
 	if (response_size <= COMMAND_POS ||
-	    response_buffer[COMMAND_POS] != cmd_code) {
+		response_buffer[COMMAND_POS] != cmd_code) {
 		hid_err(zotac->hdev,
-			"SET_COMMAND: Invalid response - size=%zu, cmd=0x%02x",
-			response_size, response_buffer[COMMAND_POS]);
+				"SET_COMMAND: Invalid response - size=%zu, cmd=0x%02x",
+		  response_size, response_buffer[COMMAND_POS]);
 		kfree(response_buffer);
-		return -EIO;
-	}
-
-	status_offset = is_status_offset ? 6 : 5;
-
-	if (response_size > status_offset) {
-		if (response_buffer[status_offset] != 0) {
-			hid_err(zotac->hdev,
-				"SET_COMMAND: Command rejected by device, status=0x%02x",
-				response_buffer[status_offset]);
-			kfree(response_buffer);
-			return -EIO;
+	return -EIO;
 		}
-	}
 
-	kfree(response_buffer);
-	return 0;
+		status_offset = is_status_offset ? 6 : 5;
+
+		if (response_size > status_offset) {
+			if (response_buffer[status_offset] != 0) {
+				hid_err(zotac->hdev,
+						"SET_COMMAND: Command rejected by device, status=0x%02x",
+			response_buffer[status_offset]);
+				kfree(response_buffer);
+				return -EIO;
+			}
+		}
+
+		kfree(response_buffer);
+		return 0;
 }
 
 int zotac_send_get_byte(struct zotac_device *zotac, u8 cmd_code, u8 setting,
-			const u8 *req_data, size_t req_data_len)
+						const u8 *req_data, size_t req_data_len)
 {
 	size_t output_len = 1;
 	u8 output_data = 0;
 	int ret;
 
 	ret = zotac_send_get_command(zotac, cmd_code, setting, req_data,
-				     req_data_len, &output_data, &output_len);
+								 req_data_len, &output_data, &output_len);
 	if (ret < 0)
 		return ret;
 
@@ -557,7 +554,7 @@ int zotac_send_get_byte(struct zotac_device *zotac, u8 cmd_code, u8 setting,
 }
 
 static int zotac_get_device_info(struct zotac_device *zotac,
-				 struct zotac_device_info *info)
+								 struct zotac_device_info *info)
 {
 	u8 data[21];
 	size_t data_len = sizeof(data);
@@ -567,21 +564,21 @@ static int zotac_get_device_info(struct zotac_device *zotac,
 		return -EINVAL;
 
 	ret = zotac_send_get_command(zotac, CMD_GET_DEVICE_INFO, 0, NULL, 0,
-				     data, &data_len);
+								 data, &data_len);
 	if (ret < 0)
 		return ret;
 
 	if (data_len < 20) {
 		dev_err(&zotac->hdev->dev,
-			"Incomplete device info received: %zu bytes\n",
-			data_len);
+				"Incomplete device info received: %zu bytes\n",
+		  data_len);
 		return -EIO;
 	}
 
 	info->device_id = ((u64)data[0] | ((u64)data[1] << 8) |
-			   ((u64)data[2] << 16) | ((u64)data[3] << 24) |
-			   ((u64)data[4] << 32) | ((u64)data[5] << 40) |
-			   ((u64)data[6] << 48) | ((u64)data[7] << 56));
+	((u64)data[2] << 16) | ((u64)data[3] << 24) |
+	((u64)data[4] << 32) | ((u64)data[5] << 40) |
+	((u64)data[6] << 48) | ((u64)data[7] << 56));
 
 	info->vid = data[8] | (data[9] << 8);
 	info->pid = data[10] | (data[11] << 8);
@@ -608,22 +605,22 @@ static void zotac_log_device_info(struct zotac_device *zotac)
 	ret = zotac_get_device_info(zotac, &info);
 	if (ret < 0) {
 		dev_err(&zotac->hdev->dev, "Failed to get device info: %d\n",
-			ret);
+				ret);
 		return;
 	}
 
 	dev_info(&zotac->hdev->dev,
-		 "Device Info:\n"
-		 "  Device ID: %016llx\n"
-		 "  VID/PID: %04x:%04x\n"
-		 "  LED Zones: %u\n"
-		 "  Firmware: %u.%u.%u (revision %u)\n"
-		 "  Hardware: %u.%u.%u\n",
-		 info.device_id, info.vid, info.pid, info.num_led_zones,
-		 info.fw_version.major, info.fw_version.mid,
-		 info.fw_version.minor, info.fw_version.revision,
-		 info.hw_version.major, info.hw_version.mid,
-		 info.hw_version.minor);
+			 "Device Info:\n"
+			 "  Device ID: %016llx\n"
+			 "  VID/PID: %04x:%04x\n"
+			 "  LED Zones: %u\n"
+			 "  Firmware: %u.%u.%u (revision %u)\n"
+			 "  Hardware: %u.%u.%u\n",
+		  info.device_id, info.vid, info.pid, info.num_led_zones,
+		  info.fw_version.major, info.fw_version.mid,
+		  info.fw_version.minor, info.fw_version.revision,
+		  info.hw_version.major, info.hw_version.mid,
+		  info.hw_version.minor);
 }
 
 static const struct button_mapping_entry *find_button_by_name(const char *name)
@@ -637,13 +634,13 @@ static const struct button_mapping_entry *find_button_by_name(const char *name)
 }
 
 static bool is_button_in_mapping(u8 *mapping_bytes,
-				 const struct button_mapping_entry *button)
+								 const struct button_mapping_entry *button)
 {
 	return (mapping_bytes[button->byte_index] & button->bit_mask) != 0;
 }
 
 static void add_button_to_mapping(u8 *mapping_bytes,
-				  const struct button_mapping_entry *button)
+								  const struct button_mapping_entry *button)
 {
 	mapping_bytes[button->byte_index] |= button->bit_mask;
 }
@@ -651,7 +648,7 @@ static void add_button_to_mapping(u8 *mapping_bytes,
 static int zotac_get_button_mapping(struct zotac_device *zotac, u8 button_id)
 {
 	if (!zotac || !zotac->cfg_data || button_id > BUTTON_MAX ||
-	    button_id == 0)
+		button_id == 0)
 		return -EINVAL;
 	return 0;
 }
@@ -659,7 +656,7 @@ static int zotac_get_button_mapping(struct zotac_device *zotac, u8 button_id)
 static int zotac_set_button_mapping(struct zotac_device *zotac, u8 button_id)
 {
 	struct button_mapping *mapping =
-		&zotac->cfg_data->button_mappings[button_id];
+	&zotac->cfg_data->button_mappings[button_id];
 	u8 data[BTN_MAP_RESPONSE_MIN_SIZE] = { 0 };
 	u8 *gamepad_bytes = (u8 *)&mapping->target_gamepad_buttons;
 
@@ -668,27 +665,27 @@ static int zotac_set_button_mapping(struct zotac_device *zotac, u8 button_id)
 
 	/* Controller button mappings */
 	data[BTN_MAP_GAMEPAD_START_IDX + GAMEPAD_DPAD_STICK_IDX] =
-		gamepad_bytes[GAMEPAD_DPAD_STICK_IDX];
+	gamepad_bytes[GAMEPAD_DPAD_STICK_IDX];
 	data[BTN_MAP_GAMEPAD_START_IDX + GAMEPAD_FACE_BUMPER_IDX] =
-		gamepad_bytes[GAMEPAD_FACE_BUMPER_IDX];
+	gamepad_bytes[GAMEPAD_FACE_BUMPER_IDX];
 	data[BTN_MAP_GAMEPAD_START_IDX + GAMEPAD_TRIGGER_IDX] =
-		gamepad_bytes[GAMEPAD_TRIGGER_IDX];
+	gamepad_bytes[GAMEPAD_TRIGGER_IDX];
 	data[BTN_MAP_GAMEPAD_START_IDX + GAMEPAD_RESERVED_IDX] =
-		gamepad_bytes[GAMEPAD_RESERVED_IDX];
+	gamepad_bytes[GAMEPAD_RESERVED_IDX];
 
 	data[BTN_MAP_MODIFIER_IDX] = mapping->target_modifier_keys;
 
 	memcpy(&data[BTN_MAP_KEYBOARD_START_IDX], mapping->target_keyboard_keys,
-	       BTN_MAP_KEYBOARD_SIZE);
+		   BTN_MAP_KEYBOARD_SIZE);
 
 	data[BTN_MAP_MOUSE_IDX] = mapping->target_mouse_buttons;
 
 	return zotac_send_set_command(zotac, CMD_SET_BUTTON_MAPPING, 0, data,
-				      BTN_MAP_RESPONSE_MIN_SIZE);
+								  BTN_MAP_RESPONSE_MIN_SIZE);
 }
 
 static void zotac_modifier_value_to_names(u8 modifiers, char *buf,
-					  size_t buf_size)
+										  size_t buf_size)
 {
 	bool first = true;
 	int i, pos = 0;
@@ -700,25 +697,25 @@ static void zotac_modifier_value_to_names(u8 modifiers, char *buf,
 
 	for (i = 0; i < ARRAY_SIZE(modifier_names); i++) {
 		if (modifier_names[i].value != MOD_NONE &&
-		    (modifiers & modifier_names[i].value)) {
+			(modifiers & modifier_names[i].value)) {
 			if (!first)
 				pos += scnprintf(buf + pos, buf_size - pos,
-						 " ");
-			pos += scnprintf(buf + pos, buf_size - pos, "%s",
-					 modifier_names[i].name);
-			first = false;
+								 " ");
+				pos += scnprintf(buf + pos, buf_size - pos, "%s",
+								 modifier_names[i].name);
+				first = false;
 
 			if (pos >= buf_size - 1)
 				break;
-		}
+			}
 	}
 }
 
 static ssize_t gamepad_show(struct device *dev, struct device_attribute *attr,
-			    char *buf, u8 button_id)
+							char *buf, u8 button_id)
 {
 	struct button_mapping *mapping =
-		&zotac.cfg_data->button_mappings[button_id];
+	&zotac.cfg_data->button_mappings[button_id];
 	bool found = false;
 	char *p = buf;
 
@@ -747,10 +744,10 @@ static ssize_t gamepad_show(struct device *dev, struct device_attribute *attr,
 }
 
 static ssize_t gamepad_store(struct device *dev, struct device_attribute *attr,
-			     const char *buf, size_t count, u8 button_id)
+							 const char *buf, size_t count, u8 button_id)
 {
 	struct button_mapping *mapping =
-		&zotac.cfg_data->button_mappings[button_id];
+	&zotac.cfg_data->button_mappings[button_id];
 	u8 *mapping_bytes = (u8 *)&mapping->target_gamepad_buttons;
 	char *buffer, *token, *cursor;
 	bool any_valid = false;
@@ -773,7 +770,7 @@ static ssize_t gamepad_store(struct device *dev, struct device_attribute *attr,
 		}
 
 		const struct button_mapping_entry *button =
-			find_button_by_name(token);
+		find_button_by_name(token);
 		if (button) {
 			add_button_to_mapping(mapping_bytes, button);
 			any_valid = true;
@@ -789,10 +786,10 @@ static ssize_t gamepad_store(struct device *dev, struct device_attribute *attr,
 }
 
 static ssize_t modifier_show(struct device *dev, struct device_attribute *attr,
-			     char *buf, u8 button_id)
+							 char *buf, u8 button_id)
 {
 	struct button_mapping *mapping =
-		&zotac.cfg_data->button_mappings[button_id];
+	&zotac.cfg_data->button_mappings[button_id];
 	u8 modifiers;
 
 	modifiers = mapping->target_modifier_keys;
@@ -803,10 +800,10 @@ static ssize_t modifier_show(struct device *dev, struct device_attribute *attr,
 }
 
 static ssize_t modifier_store(struct device *dev, struct device_attribute *attr,
-			      const char *buf, size_t count, u8 button_id)
+							  const char *buf, size_t count, u8 button_id)
 {
 	struct button_mapping *mapping =
-		&zotac.cfg_data->button_mappings[button_id];
+	&zotac.cfg_data->button_mappings[button_id];
 	char *buffer, *token, *cursor;
 	u8 new_modifiers = 0;
 	bool any_valid = false;
@@ -867,11 +864,11 @@ static const char *find_key_name_by_code(u8 code)
 }
 
 static ssize_t keyboard_keys_show(struct device *dev,
-				  struct device_attribute *attr, char *buf,
-				  u8 button_id)
+								  struct device_attribute *attr, char *buf,
+								  u8 button_id)
 {
 	struct button_mapping *mapping =
-		&zotac.cfg_data->button_mappings[button_id];
+	&zotac.cfg_data->button_mappings[button_id];
 	bool any_key = false;
 	char *p = buf;
 	int i;
@@ -898,11 +895,11 @@ static ssize_t keyboard_keys_show(struct device *dev,
 }
 
 static ssize_t keyboard_keys_store(struct device *dev,
-				   struct device_attribute *attr,
-				   const char *buf, size_t count, u8 button_id)
+								   struct device_attribute *attr,
+								   const char *buf, size_t count, u8 button_id)
 {
 	struct button_mapping *mapping =
-		&zotac.cfg_data->button_mappings[button_id];
+	&zotac.cfg_data->button_mappings[button_id];
 	u8 new_keys[BTN_MAP_KEYBOARD_SIZE] = { 0 };
 	bool any_valid = false;
 	int key_count = 0;
@@ -944,7 +941,7 @@ static ssize_t keyboard_keys_store(struct device *dev,
 }
 
 static ssize_t keyboard_list_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
+								  struct device_attribute *attr, char *buf)
 {
 	char *p = buf;
 	int i;
@@ -972,11 +969,11 @@ static ssize_t keyboard_list_show(struct device *dev,
 static DEVICE_ATTR_RO_NAMED(keyboard_list, "keyboard_list");
 
 static ssize_t mouse_buttons_show(struct device *dev,
-				  struct device_attribute *attr, char *buf,
-				  u8 button_id)
+								  struct device_attribute *attr, char *buf,
+								  u8 button_id)
 {
 	struct button_mapping *mapping =
-		&zotac.cfg_data->button_mappings[button_id];
+	&zotac.cfg_data->button_mappings[button_id];
 	u8 mouse_buttons = mapping->target_mouse_buttons;
 	bool found = false;
 	char *p = buf;
@@ -1002,11 +999,11 @@ static ssize_t mouse_buttons_show(struct device *dev,
 }
 
 static ssize_t mouse_buttons_store(struct device *dev,
-				   struct device_attribute *attr,
-				   const char *buf, size_t count, u8 button_id)
+								   struct device_attribute *attr,
+								   const char *buf, size_t count, u8 button_id)
 {
 	struct button_mapping *mapping =
-		&zotac.cfg_data->button_mappings[button_id];
+	&zotac.cfg_data->button_mappings[button_id];
 	char *buffer, *token, *cursor;
 	u8 new_mouse_buttons = 0;
 	bool any_valid = false;
@@ -1031,7 +1028,7 @@ static ssize_t mouse_buttons_store(struct device *dev,
 		for (i = 0; i < ARRAY_SIZE(mouse_button_names); i++) {
 			if (strcmp(token, mouse_button_names[i].name) == 0) {
 				new_mouse_buttons |=
-					mouse_button_names[i].value;
+				mouse_button_names[i].value;
 				any_valid = true;
 				break;
 			}
@@ -1049,7 +1046,7 @@ static ssize_t mouse_buttons_store(struct device *dev,
 }
 
 static ssize_t mouse_list_show(struct device *dev,
-			       struct device_attribute *attr, char *buf)
+							   struct device_attribute *attr, char *buf)
 {
 	char *p = buf;
 	int i;
@@ -1068,7 +1065,7 @@ static ssize_t mouse_list_show(struct device *dev,
 static DEVICE_ATTR_RO_NAMED(mouse_list, "mouse_list");
 
 static ssize_t modifier_list_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
+								  struct device_attribute *attr, char *buf)
 {
 	char *p = buf;
 	int i;
@@ -1088,7 +1085,7 @@ static DEVICE_ATTR_RO_NAMED(modifier_list, "modifier_list");
 
 /* List attributes for showing available options */
 static ssize_t gamepad_list_show(struct device *dev,
-				 struct device_attribute *attr, char *buf)
+								 struct device_attribute *attr, char *buf)
 {
 	char *p = buf;
 	int i;
@@ -1107,19 +1104,19 @@ static ssize_t gamepad_list_show(struct device *dev,
 }
 
 static ssize_t gamepad_max_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
+								struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%d\n", MAX_GAMEPAD_BUTTONS);
 }
 
 static ssize_t keyboard_max_show(struct device *dev,
-				 struct device_attribute *attr, char *buf)
+								 struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%d\n", MAX_KEYBOARD_KEYS);
 }
 
 static ssize_t mouse_max_show(struct device *dev, struct device_attribute *attr,
-			      char *buf)
+							  char *buf)
 {
 	return sprintf(buf, "%d\n", MAX_MOUSE_BUTTONS);
 }
@@ -1130,62 +1127,62 @@ static DEVICE_ATTR_RO_NAMED(keyboard_max, "keyboard_max");
 static DEVICE_ATTR_RO_NAMED(mouse_max, "mouse_max");
 
 #define DEFINE_BUTTON_REMAP_ATTRS(btn_name, btn_id)                            \
-	static ssize_t btn_name##_gamepad_show(                                \
-		struct device *dev, struct device_attribute *attr, char *buf)  \
-	{                                                                      \
-		return gamepad_show(dev, attr, buf, btn_id);                   \
-	}                                                                      \
-                                                                               \
-	static ssize_t btn_name##_gamepad_store(struct device *dev,            \
-						struct device_attribute *attr, \
-						const char *buf, size_t count) \
-	{                                                                      \
-		return gamepad_store(dev, attr, buf, count, btn_id);           \
-	}                                                                      \
-                                                                               \
-	static ssize_t btn_name##_modifier_show(                               \
-		struct device *dev, struct device_attribute *attr, char *buf)  \
-	{                                                                      \
-		return modifier_show(dev, attr, buf, btn_id);                  \
-	}                                                                      \
-                                                                               \
-	static ssize_t btn_name##_modifier_store(                              \
-		struct device *dev, struct device_attribute *attr,             \
-		const char *buf, size_t count)                                 \
-	{                                                                      \
-		return modifier_store(dev, attr, buf, count, btn_id);          \
-	}                                                                      \
-                                                                               \
-	static ssize_t btn_name##_keyboard_keys_show(                          \
-		struct device *dev, struct device_attribute *attr, char *buf)  \
-	{                                                                      \
-		return keyboard_keys_show(dev, attr, buf, btn_id);             \
-	}                                                                      \
-                                                                               \
-	static ssize_t btn_name##_keyboard_keys_store(                         \
-		struct device *dev, struct device_attribute *attr,             \
-		const char *buf, size_t count)                                 \
-	{                                                                      \
-		return keyboard_keys_store(dev, attr, buf, count, btn_id);     \
-	}                                                                      \
-                                                                               \
-	static ssize_t btn_name##_mouse_buttons_show(                          \
-		struct device *dev, struct device_attribute *attr, char *buf)  \
-	{                                                                      \
-		return mouse_buttons_show(dev, attr, buf, btn_id);             \
-	}                                                                      \
-                                                                               \
-	static ssize_t btn_name##_mouse_buttons_store(                         \
-		struct device *dev, struct device_attribute *attr,             \
-		const char *buf, size_t count)                                 \
-	{                                                                      \
-		return mouse_buttons_store(dev, attr, buf, count, btn_id);     \
-	}                                                                      \
-                                                                               \
-	static DEVICE_ATTR_RW_NAMED(btn_name##_gamepad, "gamepad");            \
-	static DEVICE_ATTR_RW_NAMED(btn_name##_modifier, "modifier");          \
-	static DEVICE_ATTR_RW_NAMED(btn_name##_keyboard_keys, "keyboard");     \
-	static DEVICE_ATTR_RW_NAMED(btn_name##_mouse_buttons, "mouse");
+static ssize_t btn_name##_gamepad_show(                                \
+struct device *dev, struct device_attribute *attr, char *buf)  \
+{                                                                      \
+	return gamepad_show(dev, attr, buf, btn_id);                   \
+}                                                                      \
+\
+static ssize_t btn_name##_gamepad_store(struct device *dev,            \
+struct device_attribute *attr, \
+const char *buf, size_t count) \
+{                                                                      \
+	return gamepad_store(dev, attr, buf, count, btn_id);           \
+}                                                                      \
+\
+static ssize_t btn_name##_modifier_show(                               \
+struct device *dev, struct device_attribute *attr, char *buf)  \
+{                                                                      \
+	return modifier_show(dev, attr, buf, btn_id);                  \
+}                                                                      \
+\
+static ssize_t btn_name##_modifier_store(                              \
+struct device *dev, struct device_attribute *attr,             \
+const char *buf, size_t count)                                 \
+{                                                                      \
+	return modifier_store(dev, attr, buf, count, btn_id);          \
+}                                                                      \
+\
+static ssize_t btn_name##_keyboard_keys_show(                          \
+struct device *dev, struct device_attribute *attr, char *buf)  \
+{                                                                      \
+	return keyboard_keys_show(dev, attr, buf, btn_id);             \
+}                                                                      \
+\
+static ssize_t btn_name##_keyboard_keys_store(                         \
+struct device *dev, struct device_attribute *attr,             \
+const char *buf, size_t count)                                 \
+{                                                                      \
+	return keyboard_keys_store(dev, attr, buf, count, btn_id);     \
+}                                                                      \
+\
+static ssize_t btn_name##_mouse_buttons_show(                          \
+struct device *dev, struct device_attribute *attr, char *buf)  \
+{                                                                      \
+	return mouse_buttons_show(dev, attr, buf, btn_id);             \
+}                                                                      \
+\
+static ssize_t btn_name##_mouse_buttons_store(                         \
+struct device *dev, struct device_attribute *attr,             \
+const char *buf, size_t count)                                 \
+{                                                                      \
+	return mouse_buttons_store(dev, attr, buf, count, btn_id);     \
+}                                                                      \
+\
+static DEVICE_ATTR_RW_NAMED(btn_name##_gamepad, "gamepad");            \
+static DEVICE_ATTR_RW_NAMED(btn_name##_modifier, "modifier");          \
+static DEVICE_ATTR_RW_NAMED(btn_name##_keyboard_keys, "keyboard");     \
+static DEVICE_ATTR_RW_NAMED(btn_name##_mouse_buttons, "mouse");
 
 /* Create all button attribute groups */
 DEFINE_BUTTON_REMAP_ATTRS(btn_a, BUTTON_A);
@@ -1212,7 +1209,7 @@ static int zotac_get_button_turbo(struct zotac_device *zotac)
 	int ret;
 
 	ret = zotac_send_get_command(zotac, CMD_GET_BUTTON_TURBO, 0, NULL, 0,
-				     &turbo_byte, &data_len);
+								 &turbo_byte, &data_len);
 	if (ret < 0)
 		return ret;
 
@@ -1228,7 +1225,7 @@ static int zotac_set_button_turbo(struct zotac_device *zotac, u8 turbo_byte)
 	int ret;
 
 	ret = zotac_send_set_command(zotac, CMD_SET_BUTTON_TURBO, 0,
-				     &turbo_byte, 1);
+								 &turbo_byte, 1);
 	if (ret < 0)
 		return ret;
 
@@ -1237,8 +1234,8 @@ static int zotac_set_button_turbo(struct zotac_device *zotac, u8 turbo_byte)
 }
 
 static ssize_t button_turbo_show(struct device *dev,
-				 struct device_attribute *attr, char *buf,
-				 int btn_pos)
+								 struct device_attribute *attr, char *buf,
+								 int btn_pos)
 {
 	u8 turbo_val;
 	int ret;
@@ -1252,8 +1249,8 @@ static ssize_t button_turbo_show(struct device *dev,
 }
 
 static ssize_t button_turbo_store(struct device *dev,
-				  struct device_attribute *attr,
-				  const char *buf, size_t count, int btn_pos)
+								  struct device_attribute *attr,
+								  const char *buf, size_t count, int btn_pos)
 {
 	u8 turbo_byte;
 	int val, ret;
@@ -1284,19 +1281,19 @@ static ssize_t button_turbo_store(struct device *dev,
 }
 
 #define DEFINE_BUTTON_TURBO_ATTRS(btn_name, btn_pos)                          \
-	static ssize_t btn_##btn_name##_turbo_show(                           \
-		struct device *dev, struct device_attribute *attr, char *buf) \
-	{                                                                     \
-		return button_turbo_show(dev, attr, buf, btn_pos);            \
-	}                                                                     \
-                                                                              \
-	static ssize_t btn_##btn_name##_turbo_store(                          \
-		struct device *dev, struct device_attribute *attr,            \
-		const char *buf, size_t count)                                \
-	{                                                                     \
-		return button_turbo_store(dev, attr, buf, count, btn_pos);    \
-	}                                                                     \
-	static DEVICE_ATTR_RW_NAMED(btn_##btn_name##_turbo, "turbo");
+static ssize_t btn_##btn_name##_turbo_show(                           \
+struct device *dev, struct device_attribute *attr, char *buf) \
+{                                                                     \
+	return button_turbo_show(dev, attr, buf, btn_pos);            \
+}                                                                     \
+\
+static ssize_t btn_##btn_name##_turbo_store(                          \
+struct device *dev, struct device_attribute *attr,            \
+const char *buf, size_t count)                                \
+{                                                                     \
+	return button_turbo_store(dev, attr, buf, count, btn_pos);    \
+}                                                                     \
+static DEVICE_ATTR_RW_NAMED(btn_##btn_name##_turbo, "turbo");
 
 DEFINE_BUTTON_TURBO_ATTRS(a, A_BTN_POS);
 DEFINE_BUTTON_TURBO_ATTRS(b, B_BTN_POS);
@@ -1309,72 +1306,72 @@ DEFINE_BUTTON_TURBO_ATTRS(rt, RT_BTN_POS);
 
 /* Create attribute groups for buttons with/without turbo */
 #define DEFINE_BUTTON_TURBO_GROUP(btn_name, btn_id)                   \
-	static struct attribute *btn_name##_main_attrs[] = {          \
-		&dev_attr_##btn_name##_turbo.attr, NULL               \
-	};                                                            \
-	static const struct attribute_group btn_name##_main_group = { \
-		.attrs = btn_name##_main_attrs,                       \
-	};
+static struct attribute *btn_name##_main_attrs[] = {          \
+	&dev_attr_##btn_name##_turbo.attr, NULL               \
+};                                                            \
+static const struct attribute_group btn_name##_main_group = { \
+	.attrs = btn_name##_main_attrs,                       \
+};
 
 #define DEFINE_BUTTON_NO_TURBO_GROUP(btn_name, btn_id)                \
-	static struct attribute *btn_name##_main_attrs[] = { NULL };  \
-	static const struct attribute_group btn_name##_main_group = { \
-		.attrs = btn_name##_main_attrs,                       \
-	};
+static struct attribute *btn_name##_main_attrs[] = { NULL };  \
+static const struct attribute_group btn_name##_main_group = { \
+	.attrs = btn_name##_main_attrs,                       \
+};
 
 /* Define remap subgroups */
 #define DEFINE_BUTTON_REMAP_GROUP(btn_name, btn_id)                    \
-	static struct attribute *btn_name##_remap_attrs[] = {          \
-		&dev_attr_##btn_name##_gamepad.attr,                   \
-		&dev_attr_##btn_name##_modifier.attr,                  \
-		&dev_attr_##btn_name##_keyboard_keys.attr,             \
-		&dev_attr_##btn_name##_mouse_buttons.attr,             \
-		&dev_attr_gamepad_list.attr,                           \
-		&dev_attr_gamepad_max.attr,                            \
-		&dev_attr_modifier_list.attr,                          \
-		&dev_attr_keyboard_list.attr,                          \
-		&dev_attr_keyboard_max.attr,                           \
-		&dev_attr_mouse_list.attr,                             \
-		&dev_attr_mouse_max.attr,                              \
-		NULL                                                   \
-	};                                                             \
-	static const struct attribute_group btn_name##_remap_group = { \
-		.name = "remap",                                       \
-		.attrs = btn_name##_remap_attrs,                       \
-	};
+static struct attribute *btn_name##_remap_attrs[] = {          \
+	&dev_attr_##btn_name##_gamepad.attr,                   \
+	&dev_attr_##btn_name##_modifier.attr,                  \
+	&dev_attr_##btn_name##_keyboard_keys.attr,             \
+	&dev_attr_##btn_name##_mouse_buttons.attr,             \
+	&dev_attr_gamepad_list.attr,                           \
+	&dev_attr_gamepad_max.attr,                            \
+	&dev_attr_modifier_list.attr,                          \
+	&dev_attr_keyboard_list.attr,                          \
+	&dev_attr_keyboard_max.attr,                           \
+	&dev_attr_mouse_list.attr,                             \
+	&dev_attr_mouse_max.attr,                              \
+	NULL                                                   \
+};                                                             \
+static const struct attribute_group btn_name##_remap_group = { \
+	.name = "remap",                                       \
+	.attrs = btn_name##_remap_attrs,                       \
+};
 
 /* Define button directory */
 #define DEFINE_BUTTON_GROUP_WITH_TURBO(btn_name, btn_id) \
-	DEFINE_BUTTON_TURBO_GROUP(btn_name, btn_id)      \
-	DEFINE_BUTTON_REMAP_GROUP(btn_name, btn_id)
+DEFINE_BUTTON_TURBO_GROUP(btn_name, btn_id)      \
+DEFINE_BUTTON_REMAP_GROUP(btn_name, btn_id)
 
 #define DEFINE_BUTTON_DIR_WITH_TURBO(btn_name, btn_id)                     \
-	{                                                                  \
-		.name = #btn_name,                                         \
-		.button_id = btn_id,                                       \
-		.has_turbo = true,                                         \
-		.kobj = NULL,                                              \
-		.main_group =                                              \
-			(struct attribute_group *)&btn_name##_main_group,  \
-		.remap_group =                                             \
-			(struct attribute_group *)&btn_name##_remap_group, \
-	}
+{                                                                  \
+	.name = #btn_name,                                         \
+	.button_id = btn_id,                                       \
+	.has_turbo = true,                                         \
+	.kobj = NULL,                                              \
+	.main_group =                                              \
+	(struct attribute_group *)&btn_name##_main_group,  \
+	.remap_group =                                             \
+	(struct attribute_group *)&btn_name##_remap_group, \
+}
 
 #define DEFINE_BUTTON_GROUP_NO_TURBO(btn_name, btn_id) \
-	DEFINE_BUTTON_NO_TURBO_GROUP(btn_name, btn_id) \
-	DEFINE_BUTTON_REMAP_GROUP(btn_name, btn_id)
+DEFINE_BUTTON_NO_TURBO_GROUP(btn_name, btn_id) \
+DEFINE_BUTTON_REMAP_GROUP(btn_name, btn_id)
 
 #define DEFINE_BUTTON_DIR_NO_TURBO(btn_name, btn_id)                       \
-	{                                                                  \
-		.name = #btn_name,                                         \
-		.button_id = btn_id,                                       \
-		.has_turbo = false,                                        \
-		.kobj = NULL,                                              \
-		.main_group =                                              \
-			(struct attribute_group *)&btn_name##_main_group,  \
-		.remap_group =                                             \
-			(struct attribute_group *)&btn_name##_remap_group, \
-	}
+{                                                                  \
+	.name = #btn_name,                                         \
+	.button_id = btn_id,                                       \
+	.has_turbo = false,                                        \
+	.kobj = NULL,                                              \
+	.main_group =                                              \
+	(struct attribute_group *)&btn_name##_main_group,  \
+	.remap_group =                                             \
+	(struct attribute_group *)&btn_name##_remap_group, \
+}
 
 DEFINE_BUTTON_GROUP_WITH_TURBO(btn_a, BUTTON_A);
 DEFINE_BUTTON_GROUP_WITH_TURBO(btn_b, BUTTON_B);
@@ -1415,7 +1412,7 @@ static struct button_directory button_dirs[] = {
 };
 
 static int zotac_get_stick_sensitivity(struct zotac_device *zotac,
-				       int stick_num, u8 *output_values)
+									   int stick_num, u8 *output_values)
 {
 	u8 request_data = stick_num;
 	u8 temp_values[STICK_SENSITIVITY_SIZE];
@@ -1423,8 +1420,8 @@ static int zotac_get_stick_sensitivity(struct zotac_device *zotac,
 	int i, ret;
 
 	ret = zotac_send_get_command(zotac, CMD_GET_STICK_SENSITIVITY, 0,
-				     &request_data, 1, temp_values,
-				     &output_len);
+								 &request_data, 1, temp_values,
+							  &output_len);
 
 	if (ret == 0 && output_len == STICK_SENSITIVITY_SIZE) {
 		/* Scale from percentage (0-100) to device values (0-255) */
@@ -1446,11 +1443,11 @@ get_sensitivity_for_stick(struct zotac_device *zotac, int stick_num)
 }
 
 static ssize_t curve_response_show(struct device *dev,
-				   struct device_attribute *attr, char *buf,
-				   int stick_num, int point_index)
+								   struct device_attribute *attr, char *buf,
+								   int stick_num, int point_index)
 {
 	struct stick_sensitivity *sensitivity =
-		get_sensitivity_for_stick(&zotac, stick_num);
+	get_sensitivity_for_stick(&zotac, stick_num);
 	int base_idx = point_index * 2;
 
 	// Dev input is 0-255, but it outputs 0-100. So we store as 0-255
@@ -1461,12 +1458,12 @@ static ssize_t curve_response_show(struct device *dev,
 }
 
 static ssize_t curve_response_store(struct device *dev,
-				    struct device_attribute *attr,
-				    const char *buf, size_t count,
-				    int stick_num, int point_index)
+									struct device_attribute *attr,
+									const char *buf, size_t count,
+									int stick_num, int point_index)
 {
 	struct stick_sensitivity *sensitivity =
-		get_sensitivity_for_stick(&zotac, stick_num);
+	get_sensitivity_for_stick(&zotac, stick_num);
 	u8 data[STICK_SENSITIVITY_SIZE + 1]; // +1 for stick ID
 	int base_idx = point_index * 2;
 
@@ -1486,10 +1483,10 @@ static ssize_t curve_response_store(struct device *dev,
 	data[STICK_SENSITIVITY_NUM_IDX] = stick_num;
 
 	memcpy(&data[STICK_SENSITIVITY_DATA_IDX], sensitivity->values,
-	       STICK_SENSITIVITY_SIZE);
+		   STICK_SENSITIVITY_SIZE);
 
 	ret = zotac_send_set_command(&zotac, CMD_SET_STICK_SENSITIVITY, 0, data,
-				     sizeof(data));
+								 sizeof(data));
 	if (ret < 0)
 		return ret;
 
@@ -1497,23 +1494,23 @@ static ssize_t curve_response_store(struct device *dev,
 }
 
 #define DEFINE_CURVE_RESPONSE_ATTRS(stick_name, stick_num, point_num)           \
-	static ssize_t stick_##stick_name##_curve_response_##point_num##_show(  \
-		struct device *dev, struct device_attribute *attr, char *buf)   \
-	{                                                                       \
-		return curve_response_show(dev, attr, buf, stick_num,           \
-					   point_num - 1);                      \
-	}                                                                       \
-                                                                                \
-	static ssize_t stick_##stick_name##_curve_response_##point_num##_store( \
-		struct device *dev, struct device_attribute *attr,              \
-		const char *buf, size_t count)                                  \
-	{                                                                       \
-		return curve_response_store(dev, attr, buf, count, stick_num,   \
-					    point_num - 1);                     \
-	}                                                                       \
-	static DEVICE_ATTR_RW_NAMED(                                            \
-		stick_##stick_name##_curve_response_##point_num,                \
-		"curve_response_pct_" #point_num);
+static ssize_t stick_##stick_name##_curve_response_##point_num##_show(  \
+struct device *dev, struct device_attribute *attr, char *buf)   \
+{                                                                       \
+	return curve_response_show(dev, attr, buf, stick_num,           \
+	point_num - 1);                      \
+}                                                                       \
+\
+static ssize_t stick_##stick_name##_curve_response_##point_num##_store( \
+struct device *dev, struct device_attribute *attr,              \
+const char *buf, size_t count)                                  \
+{                                                                       \
+	return curve_response_store(dev, attr, buf, count, stick_num,   \
+	point_num - 1);                     \
+}                                                                       \
+static DEVICE_ATTR_RW_NAMED(                                            \
+stick_##stick_name##_curve_response_##point_num,                \
+"curve_response_pct_" #point_num);
 
 DEFINE_CURVE_RESPONSE_ATTRS(xy_left, STICK_LEFT, 1)
 DEFINE_CURVE_RESPONSE_ATTRS(xy_left, STICK_LEFT, 2)
@@ -1526,23 +1523,23 @@ DEFINE_CURVE_RESPONSE_ATTRS(xy_right, STICK_RIGHT, 3)
 DEFINE_CURVE_RESPONSE_ATTRS(xy_right, STICK_RIGHT, 4)
 
 static ssize_t axis_xyz_deadzone_index_show(struct device *dev,
-					    struct device_attribute *attr,
-					    char *buf)
+											struct device_attribute *attr,
+											char *buf)
 {
 	return sprintf(buf, "inner outer\n");
 }
 static DEVICE_ATTR_RO_NAMED(axis_xyz_deadzone_index, "deadzone_index");
 
 static ssize_t axis_xyz_deadzone_show(struct device *dev,
-				      struct device_attribute *attr, char *buf,
-				      struct deadzone *dz)
+									  struct device_attribute *attr, char *buf,
+									  struct deadzone *dz)
 {
 	return sprintf(buf, "%d %d\n", dz->inner, dz->outer);
 }
 
 static int zotac_apply_deadzones(struct zotac_device *zotac,
-				 struct deadzone *left_dz,
-				 struct deadzone *right_dz, u8 cmd_code)
+								 struct deadzone *left_dz,
+								 struct deadzone *right_dz, u8 cmd_code)
 {
 	u8 data[DZ_RESPONSE_SIZE];
 	int ret;
@@ -1558,9 +1555,9 @@ static int zotac_apply_deadzones(struct zotac_device *zotac,
 }
 
 static ssize_t axis_xyz_deadzone_store(struct device *dev,
-				       struct device_attribute *attr,
-				       const char *buf, size_t count,
-				       struct deadzone *dz)
+									   struct device_attribute *attr,
+									   const char *buf, size_t count,
+									   struct deadzone *dz)
 {
 	struct zotac_cfg_data *cfg = zotac.cfg_data;
 	int inner, outer;
@@ -1581,11 +1578,11 @@ static ssize_t axis_xyz_deadzone_store(struct device *dev,
 	if (dz == &cfg->ls_dz || dz == &cfg->rs_dz) {
 		cmd_code = CMD_SET_STICK_DEADZONES;
 		ret = zotac_apply_deadzones(&zotac, &cfg->ls_dz, &cfg->rs_dz,
-					    cmd_code);
+									cmd_code);
 	} else {
 		cmd_code = CMD_SET_TRIGGER_DEADZONES;
 		ret = zotac_apply_deadzones(&zotac, &cfg->lt_dz, &cfg->rt_dz,
-					    cmd_code);
+									cmd_code);
 	}
 
 	if (ret < 0)
@@ -1595,48 +1592,48 @@ static ssize_t axis_xyz_deadzone_store(struct device *dev,
 }
 
 #define DEFINE_DEADZONE_HANDLERS(axis_name, dz_field)                         \
-	static ssize_t axis_##axis_name##_deadzone_show(                      \
-		struct device *dev, struct device_attribute *attr, char *buf) \
-	{                                                                     \
-		return axis_xyz_deadzone_show(dev, attr, buf,                 \
-					      &zotac.cfg_data->dz_field);    \
-	}                                                                     \
-                                                                              \
-	static ssize_t axis_##axis_name##_deadzone_store(                     \
-		struct device *dev, struct device_attribute *attr,            \
-		const char *buf, size_t count)                                \
-	{                                                                     \
-		return axis_xyz_deadzone_store(dev, attr, buf, count,         \
-					       &zotac.cfg_data->dz_field);   \
-	}                                                                     \
-	static DEVICE_ATTR_RW_NAMED(axis_##axis_name##_deadzone, "deadzone");
+static ssize_t axis_##axis_name##_deadzone_show(                      \
+struct device *dev, struct device_attribute *attr, char *buf) \
+{                                                                     \
+	return axis_xyz_deadzone_show(dev, attr, buf,                 \
+	&zotac.cfg_data->dz_field);    \
+}                                                                     \
+\
+static ssize_t axis_##axis_name##_deadzone_store(                     \
+struct device *dev, struct device_attribute *attr,            \
+const char *buf, size_t count)                                \
+{                                                                     \
+	return axis_xyz_deadzone_store(dev, attr, buf, count,         \
+	&zotac.cfg_data->dz_field);   \
+}                                                                     \
+static DEVICE_ATTR_RW_NAMED(axis_##axis_name##_deadzone, "deadzone");
 
 #define DEFINE_XY_AXIS_ATTR_GROUP(axis_name)                                  \
-	static struct attribute *axis_##axis_name##_attrs[] = {               \
-		&dev_attr_axis_##axis_name##_deadzone.attr,                   \
-		&dev_attr_stick_##axis_name##_curve_response_1.attr,          \
-		&dev_attr_stick_##axis_name##_curve_response_2.attr,          \
-		&dev_attr_stick_##axis_name##_curve_response_3.attr,          \
-		&dev_attr_stick_##axis_name##_curve_response_4.attr,          \
-		&dev_attr_axis_xyz_deadzone_index.attr,                       \
-		NULL                                                          \
-	};                                                                    \
-                                                                              \
-	static const struct attribute_group axis_##axis_name##_attr_group = { \
-		.name = "axis_" #axis_name,                                   \
-		.attrs = axis_##axis_name##_attrs,                            \
-	};
+static struct attribute *axis_##axis_name##_attrs[] = {               \
+	&dev_attr_axis_##axis_name##_deadzone.attr,                   \
+	&dev_attr_stick_##axis_name##_curve_response_1.attr,          \
+	&dev_attr_stick_##axis_name##_curve_response_2.attr,          \
+	&dev_attr_stick_##axis_name##_curve_response_3.attr,          \
+	&dev_attr_stick_##axis_name##_curve_response_4.attr,          \
+	&dev_attr_axis_xyz_deadzone_index.attr,                       \
+	NULL                                                          \
+};                                                                    \
+\
+static const struct attribute_group axis_##axis_name##_attr_group = { \
+	.name = "axis_" #axis_name,                                   \
+	.attrs = axis_##axis_name##_attrs,                            \
+};
 
 #define DEFINE_Z_AXIS_ATTR_GROUP(axis_name)                                   \
-	static struct attribute *axis_##axis_name##_attrs[] = {               \
-		&dev_attr_axis_##axis_name##_deadzone.attr,                   \
-		&dev_attr_axis_xyz_deadzone_index.attr, NULL                  \
-	};                                                                    \
-                                                                              \
-	static const struct attribute_group axis_##axis_name##_attr_group = { \
-		.name = "axis_" #axis_name,                                   \
-		.attrs = axis_##axis_name##_attrs,                            \
-	};
+static struct attribute *axis_##axis_name##_attrs[] = {               \
+	&dev_attr_axis_##axis_name##_deadzone.attr,                   \
+	&dev_attr_axis_xyz_deadzone_index.attr, NULL                  \
+};                                                                    \
+\
+static const struct attribute_group axis_##axis_name##_attr_group = { \
+	.name = "axis_" #axis_name,                                   \
+	.attrs = axis_##axis_name##_attrs,                            \
+};
 
 DEFINE_DEADZONE_HANDLERS(xy_left, ls_dz);
 DEFINE_DEADZONE_HANDLERS(xy_right, rs_dz);
@@ -1649,43 +1646,43 @@ DEFINE_Z_AXIS_ATTR_GROUP(z_left);
 DEFINE_Z_AXIS_ATTR_GROUP(z_right);
 
 static ssize_t vibration_intensity_index_show(struct device *dev,
-					      struct device_attribute *attr,
-					      char *buf)
+											  struct device_attribute *attr,
+											  char *buf)
 {
 	return sprintf(buf,
-		       "trigger_left trigger_right rumble_left rumble_right\n");
+				   "trigger_left trigger_right rumble_left rumble_right\n");
 }
 static DEVICE_ATTR_RO_NAMED(vibration_intensity_index,
-			    "vibration_intensity_index");
+							"vibration_intensity_index");
 
 static ssize_t vibration_intensity_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
+										struct device_attribute *attr,
+										char *buf)
 {
 	u8 data[VIB_RESPONSE_SIZE];
 	size_t data_len = sizeof(data);
 	int ret;
 
 	ret = zotac_send_get_command(&zotac, CMD_GET_VIBRATION_STRENGTH, 0, NULL,
-				     0, data, &data_len);
+								 0, data, &data_len);
 	if (ret < 0)
 		return ret;
 
 	if (data_len < VIB_RESPONSE_SIZE) {
 		dev_err(&zotac.hdev->dev,
-			"Incomplete vibration data received: %zu bytes\n",
-			data_len);
+				"Incomplete vibration data received: %zu bytes\n",
+		  data_len);
 		return -EIO;
 	}
 
 	return sprintf(buf, "%d %d %d %d\n", data[VIB_LEFT_TRIGGER_IDX],
-		       data[VIB_RIGHT_TRIGGER_IDX], data[VIB_LEFT_RUMBLE_IDX],
-		       data[VIB_RIGHT_RUMBLE_IDX]);
+				   data[VIB_RIGHT_TRIGGER_IDX], data[VIB_LEFT_RUMBLE_IDX],
+				data[VIB_RIGHT_RUMBLE_IDX]);
 }
 
 static ssize_t vibration_intensity_store(struct device *dev,
-					 struct device_attribute *attr,
-					 const char *buf, size_t count)
+										 struct device_attribute *attr,
+										 const char *buf, size_t count)
 {
 	u8 data[VIB_RESPONSE_SIZE];
 	int lt, rt, lr, rr;
@@ -1701,7 +1698,7 @@ static ssize_t vibration_intensity_store(struct device *dev,
 	data[VIB_RIGHT_RUMBLE_IDX] = clamp_val(rr, 0, 100);
 
 	ret = zotac_send_set_command(&zotac, CMD_SET_VIBRATION_STRENGTH, 0, data,
-				     sizeof(data));
+								 sizeof(data));
 	if (ret < 0)
 		return ret;
 
@@ -1710,14 +1707,14 @@ static ssize_t vibration_intensity_store(struct device *dev,
 static DEVICE_ATTR_RW(vibration_intensity);
 
 static ssize_t mouse_speed_max_show(struct device *dev,
-				    struct device_attribute *attr, char *buf)
+									struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%d\n", MOUSE_SPEED_MAX);
 }
 static DEVICE_ATTR_RO_NAMED(mouse_speed_max, "mouse_speed_max");
 
 static ssize_t mouse_speed_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
+								struct device_attribute *attr, char *buf)
 {
 	int speed;
 
@@ -1729,8 +1726,8 @@ static ssize_t mouse_speed_show(struct device *dev,
 }
 
 static ssize_t mouse_speed_store(struct device *dev,
-				 struct device_attribute *attr, const char *buf,
-				 size_t count)
+								 struct device_attribute *attr, const char *buf,
+								 size_t count)
 {
 	int speed_val;
 	u8 speed;
@@ -1753,8 +1750,8 @@ static ssize_t mouse_speed_store(struct device *dev,
 static DEVICE_ATTR_RW(mouse_speed);
 
 static ssize_t motor_test_store(struct device *dev,
-				struct device_attribute *attr, const char *buf,
-				size_t count)
+								struct device_attribute *attr, const char *buf,
+								size_t count)
 {
 	u8 data[MOTOR_TEST_SIZE] = { 0 };
 
@@ -1762,7 +1759,7 @@ static ssize_t motor_test_store(struct device *dev,
 	int ret;
 
 	ret = sscanf(buf, "%d %d %d %d", &left_trigger, &right_trigger,
-		     &left_rumble, &right_rumble);
+				 &left_rumble, &right_rumble);
 	if (ret != 4)
 		return -EINVAL;
 
@@ -1777,7 +1774,7 @@ static ssize_t motor_test_store(struct device *dev,
 	data[3] = (u8)right_rumble; /* Right Rumble Motor */
 
 	ret = zotac_send_set_command(&zotac, CMD_MOTOR_TEST, 0, data,
-				     MOTOR_TEST_SIZE);
+								 MOTOR_TEST_SIZE);
 	if (ret < 0)
 		return ret;
 
@@ -1786,15 +1783,15 @@ static ssize_t motor_test_store(struct device *dev,
 static DEVICE_ATTR_WO(motor_test);
 
 static ssize_t motor_test_index_show(struct device *dev,
-				     struct device_attribute *attr, char *buf)
+									 struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf,
-		       "left_trigger right_trigger left_rumble right_rumble\n");
+				   "left_trigger right_trigger left_rumble right_rumble\n");
 }
 static DEVICE_ATTR_RO_NAMED(motor_test_index, "motor_test_index");
 
 static ssize_t profile_show(struct device *dev, struct device_attribute *attr,
-			    char *buf)
+							char *buf)
 {
 	int profile;
 
@@ -1806,7 +1803,7 @@ static ssize_t profile_show(struct device *dev, struct device_attribute *attr,
 }
 
 static ssize_t profile_store(struct device *dev, struct device_attribute *attr,
-			     const char *buf, size_t count)
+							 const char *buf, size_t count)
 {
 	int profile_id, ret;
 	u8 profile;
@@ -1832,19 +1829,18 @@ static ssize_t profile_store(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR_RW_NAMED(profile, "current");
 
 static ssize_t profile_count_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
+								  struct device_attribute *attr, char *buf)
 {
 
 	return sprintf(buf, "%d\n",
-		       zotac_send_get_byte(&zotac, CMD_GET_PROFILE_NUM, 0, NULL,
-					   0));
+				   zotac_send_get_byte(&zotac, CMD_GET_PROFILE_NUM, 0, NULL,
+									   0));
 }
 static DEVICE_ATTR_RO_NAMED(profile_count, "count");
 
-/* The device resets and reconnects */
 static ssize_t restore_profile_store(struct device *dev,
-				     struct device_attribute *attr,
-				     const char *buf, size_t count)
+									 struct device_attribute *attr,
+									 const char *buf, size_t count)
 {
 	int val, ret;
 
@@ -1875,8 +1871,8 @@ static const struct attribute_group zotac_profile_attr_group = {
 };
 
 static ssize_t save_config_store(struct device *dev,
-				 struct device_attribute *attr, const char *buf,
-				 size_t count)
+								 struct device_attribute *attr, const char *buf,
+								 size_t count)
 {
 	int val, ret;
 
@@ -1896,7 +1892,7 @@ static ssize_t save_config_store(struct device *dev,
 static DEVICE_ATTR_WO(save_config);
 
 static ssize_t qam_mode_show(struct device *dev, struct device_attribute *attr,
-			     char *buf)
+							 char *buf)
 {
 	if (!zotac.gamepad)
 		return -ENODEV;
@@ -1905,7 +1901,7 @@ static ssize_t qam_mode_show(struct device *dev, struct device_attribute *attr,
 }
 
 static ssize_t qam_mode_store(struct device *dev, struct device_attribute *attr,
-			      const char *buf, size_t count)
+							  const char *buf, size_t count)
 {
 	u8 value;
 	int ret;
@@ -1926,6 +1922,106 @@ static ssize_t qam_mode_store(struct device *dev, struct device_attribute *attr,
 }
 DEVICE_ATTR_RW(qam_mode);
 
+/* --- Dial Attributes --- */
+
+static const char *get_dial_func_name(enum zotac_dial_function func)
+{
+	int i;
+	for (i = 0; i < ARRAY_SIZE(dial_func_names); i++) {
+		if (dial_func_names[i].func == func)
+			return dial_func_names[i].name;
+	}
+	return "scroll";
+}
+
+static ssize_t dial_show(struct device *dev, struct device_attribute *attr,
+						 char *buf, enum zotac_dial_function current_func)
+{
+	return sprintf(buf, "%s\n", get_dial_func_name(current_func));
+}
+
+static ssize_t dial_store(struct device *dev, struct device_attribute *attr,
+						  const char *buf, size_t count,
+						  enum zotac_dial_function *target_func)
+{
+	char *str = kstrndup(buf, count, GFP_KERNEL);
+	char *token;
+	int i;
+	bool found = false;
+
+	if (!str)
+		return -ENOMEM;
+
+	token = strim(str);
+
+	for (i = 0; i < ARRAY_SIZE(dial_func_names); i++) {
+		if (strcmp(token, dial_func_names[i].name) == 0) {
+			*target_func = dial_func_names[i].func;
+			found = true;
+			break;
+		}
+	}
+
+	kfree(str);
+
+	if (!found)
+		return -EINVAL;
+
+	return count;
+}
+
+static ssize_t dial_left_show(struct device *dev, struct device_attribute *attr,
+							  char *buf)
+{
+	if (!zotac.cfg_data) return -ENODEV;
+	return dial_show(dev, attr, buf, zotac.cfg_data->left_dial_func);
+}
+
+static ssize_t dial_left_store(struct device *dev,
+							   struct device_attribute *attr, const char *buf,
+							   size_t count)
+{
+	if (!zotac.cfg_data) return -ENODEV;
+	return dial_store(dev, attr, buf, count, &zotac.cfg_data->left_dial_func);
+}
+static DEVICE_ATTR_RW(dial_left);
+
+static ssize_t dial_right_show(struct device *dev,
+							   struct device_attribute *attr, char *buf)
+{
+	if (!zotac.cfg_data) return -ENODEV;
+	return dial_show(dev, attr, buf, zotac.cfg_data->right_dial_func);
+}
+
+static ssize_t dial_right_store(struct device *dev,
+								struct device_attribute *attr, const char *buf,
+								size_t count)
+{
+	if (!zotac.cfg_data) return -ENODEV;
+	return dial_store(dev, attr, buf, count, &zotac.cfg_data->right_dial_func);
+}
+static DEVICE_ATTR_RW(dial_right);
+
+static ssize_t dial_list_show(struct device *dev, struct device_attribute *attr,
+							  char *buf)
+{
+	char *p = buf;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(dial_func_names); i++) {
+		p += sprintf(p, "%s ", dial_func_names[i].name);
+	}
+
+	if (p > buf)
+		*(p - 1) = '\n';
+	else
+		*p++ = '\n';
+
+	return p - buf;
+}
+static DEVICE_ATTR_RO_NAMED(dial_list, "dial_list");
+
+
 static struct attribute *zotac_root_attrs[] = {
 	&dev_attr_save_config.attr,
 	&dev_attr_qam_mode.attr,
@@ -1935,6 +2031,9 @@ static struct attribute *zotac_root_attrs[] = {
 	&dev_attr_mouse_speed_max.attr,
 	&dev_attr_motor_test.attr,
 	&dev_attr_motor_test_index.attr,
+	&dev_attr_dial_left.attr,
+	&dev_attr_dial_right.attr,
+	&dev_attr_dial_list.attr,
 	NULL
 };
 
@@ -1965,7 +2064,7 @@ int zotac_register_sysfs(struct zotac_device *zotac)
 	ret = sysfs_create_groups(&dev->kobj, zotac_top_level_attr_groups);
 	if (ret) {
 		dev_err(dev, "Failed to create top-level sysfs groups: %d\n",
-			ret);
+				ret);
 		return ret;
 	}
 
@@ -1974,10 +2073,10 @@ int zotac_register_sysfs(struct zotac_device *zotac)
 
 		/* Create the button directory kobject */
 		btn_dir->kobj =
-			kobject_create_and_add(btn_dir->name, &dev->kobj);
+		kobject_create_and_add(btn_dir->name, &dev->kobj);
 		if (!btn_dir->kobj) {
 			dev_err(dev, "Failed to create kobject for %s\n",
-				btn_dir->name);
+					btn_dir->name);
 			ret = -ENOMEM;
 			goto cleanup;
 		}
@@ -1986,7 +2085,7 @@ int zotac_register_sysfs(struct zotac_device *zotac)
 		ret = sysfs_create_group(btn_dir->kobj, btn_dir->main_group);
 		if (ret) {
 			dev_err(dev, "Failed to create main group for %s: %d\n",
-				btn_dir->name, ret);
+					btn_dir->name, ret);
 			goto cleanup;
 		}
 
@@ -1994,15 +2093,15 @@ int zotac_register_sysfs(struct zotac_device *zotac)
 		ret = sysfs_create_group(btn_dir->kobj, btn_dir->remap_group);
 		if (ret) {
 			dev_err(dev,
-				"Failed to create remap group for %s: %d\n",
-				btn_dir->name, ret);
+					"Failed to create remap group for %s: %d\n",
+		   btn_dir->name, ret);
 			goto cleanup;
 		}
 	}
 
 	return 0;
 
-cleanup:
+	cleanup:
 	/* Clean up on error */
 	for (i = 0; button_dirs[i].name != NULL; i++) {
 		if (button_dirs[i].kobj) {
@@ -2037,14 +2136,6 @@ void zotac_unregister_sysfs(struct zotac_device *zotac)
 	sysfs_remove_groups(&dev->kobj, zotac_top_level_attr_groups);
 }
 
-/**
- * zotac_cfg_refresh - Refresh all configuration data from the device
- * @zotac: The zotac device to refresh
- *
- * This function queries the device for all current configuration and
- * updates the driver's cached values. It should be called during
- * initialization and after profile changes or restores.
- */
 int zotac_cfg_refresh(struct zotac_device *zotac)
 {
 	struct zotac_cfg_data *cfg;
@@ -2057,8 +2148,12 @@ int zotac_cfg_refresh(struct zotac_device *zotac)
 
 	cfg = zotac->cfg_data;
 
+	/* Initialize Dial functions to defaults */
+	cfg->left_dial_func = DIAL_SCROLL_H;
+	cfg->right_dial_func = DIAL_SCROLL;
+
 	ret = zotac_send_get_command(zotac, CMD_GET_STICK_DEADZONES, 0, NULL, 0,
-				     data, &data_len);
+								 data, &data_len);
 	if (ret == 0 && data_len >= DZ_RESPONSE_SIZE) {
 		cfg->ls_dz.inner = data[DZ_LEFT_INNER_IDX];
 		cfg->ls_dz.outer = data[DZ_LEFT_OUTER_IDX];
@@ -2067,7 +2162,7 @@ int zotac_cfg_refresh(struct zotac_device *zotac)
 	} else {
 		dev_info(
 			&zotac->hdev->dev,
-			"Could not retrieve stick deadzone settings, using defaults\n");
+		   "Could not retrieve stick deadzone settings, using defaults\n");
 		cfg->ls_dz.inner = 0;
 		cfg->ls_dz.outer = 100;
 		cfg->rs_dz.inner = 0;
@@ -2075,7 +2170,7 @@ int zotac_cfg_refresh(struct zotac_device *zotac)
 	}
 
 	ret = zotac_send_get_command(zotac, CMD_GET_TRIGGER_DEADZONES, 0, NULL,
-				     0, data, &data_len);
+								 0, data, &data_len);
 	if (ret == 0 && data_len >= DZ_RESPONSE_SIZE) {
 		cfg->lt_dz.inner = data[DZ_LEFT_INNER_IDX];
 		cfg->lt_dz.outer = data[DZ_LEFT_OUTER_IDX];
@@ -2084,7 +2179,7 @@ int zotac_cfg_refresh(struct zotac_device *zotac)
 	} else {
 		dev_info(
 			&zotac->hdev->dev,
-			"Could not retrieve trigger deadzone settings, using defaults\n");
+		   "Could not retrieve trigger deadzone settings, using defaults\n");
 		cfg->lt_dz.inner = 0;
 		cfg->lt_dz.outer = 100;
 		cfg->rt_dz.inner = 0;
@@ -2092,11 +2187,11 @@ int zotac_cfg_refresh(struct zotac_device *zotac)
 	}
 
 	ret = zotac_get_stick_sensitivity(zotac, STICK_LEFT,
-					  cfg->left_stick_sensitivity.values);
+									  cfg->left_stick_sensitivity.values);
 	if (ret < 0) {
 		dev_info(
 			&zotac->hdev->dev,
-			"Could not retrieve left stick sensitivity, using defaults\n");
+		   "Could not retrieve left stick sensitivity, using defaults\n");
 		/* Initialize with linear response: 25%, 50%, 75%, 100% */
 		cfg->left_stick_sensitivity.values[0] = 64; /* X1 = 25% */
 		cfg->left_stick_sensitivity.values[1] = 64; /* Y1 = 25% */
@@ -2109,22 +2204,22 @@ int zotac_cfg_refresh(struct zotac_device *zotac)
 	}
 
 	ret = zotac_get_stick_sensitivity(zotac, STICK_RIGHT,
-					  cfg->right_stick_sensitivity.values);
+									  cfg->right_stick_sensitivity.values);
 	if (ret < 0) {
 		dev_info(
 			&zotac->hdev->dev,
-			"Could not retrieve right stick sensitivity, using defaults\n");
+		   "Could not retrieve right stick sensitivity, using defaults\n");
 		/* Copy the left stick values which may be initialized or linear defaults */
 		memcpy(cfg->right_stick_sensitivity.values,
-		       cfg->left_stick_sensitivity.values,
-		       sizeof(cfg->right_stick_sensitivity.values));
+			   cfg->left_stick_sensitivity.values,
+		 sizeof(cfg->right_stick_sensitivity.values));
 	}
 
 	ret = zotac_get_button_turbo(zotac);
 	if (ret < 0) {
 		dev_info(
 			&zotac->hdev->dev,
-			"Could not retrieve button turbo settings, using defaults\n");
+		   "Could not retrieve button turbo settings, using defaults\n");
 		cfg->button_turbo = 0; /* Default: no turbo buttons */
 	}
 
@@ -2137,45 +2232,37 @@ int zotac_cfg_refresh(struct zotac_device *zotac)
 		cfg->button_mappings[i].target_gamepad_buttons = 0;
 		cfg->button_mappings[i].target_modifier_keys = 0;
 		memset(cfg->button_mappings[i].target_keyboard_keys, 0,
-		       MAX_KEYBOARD_KEYS);
+			   MAX_KEYBOARD_KEYS);
 		cfg->button_mappings[i].target_mouse_buttons = 0;
 
 		ret = zotac_send_get_command(zotac, CMD_GET_BUTTON_MAPPING, 0,
-					     &request_data, 1, response_data,
-					     &response_len);
+									 &request_data, 1, response_data,
+							   &response_len);
 		if (ret == 0 && response_len >= BTN_MAP_RESPONSE_MIN_SIZE) {
 			memcpy(&cfg->button_mappings[i].target_gamepad_buttons,
-			       &response_data[BTN_MAP_GAMEPAD_START_IDX],
-			       BTN_MAP_GAMEPAD_SIZE);
+				   &response_data[BTN_MAP_GAMEPAD_START_IDX],
+		  BTN_MAP_GAMEPAD_SIZE);
 
 			cfg->button_mappings[i].target_modifier_keys =
-				response_data[BTN_MAP_MODIFIER_IDX];
+			response_data[BTN_MAP_MODIFIER_IDX];
 
 			memcpy(cfg->button_mappings[i].target_keyboard_keys,
-			       &response_data[BTN_MAP_KEYBOARD_START_IDX],
-			       BTN_MAP_KEYBOARD_SIZE);
+				   &response_data[BTN_MAP_KEYBOARD_START_IDX],
+		  BTN_MAP_KEYBOARD_SIZE);
 
 			cfg->button_mappings[i].target_mouse_buttons =
-				response_data[BTN_MAP_MOUSE_IDX];
+			response_data[BTN_MAP_MOUSE_IDX];
 		} else {
 			dev_info(
 				&zotac->hdev->dev,
-				"Could not retrieve button %d mapping, using defaults\n",
-				i);
+			"Could not retrieve button %d mapping, using defaults\n",
+			i);
 		}
 	}
 
 	return 0;
 }
 
-/**
- * zotac_cfg_setup - Allocate and initialize config data structure
- * @zotac: The zotac device to set up
- *
- * This function allocates the config data structure and initializes
- * the mutex and sequence number. It should be called once during
- * driver initialization.
- */
 static int zotac_cfg_setup(struct zotac_device *zotac)
 {
 	struct zotac_cfg_data *cfg;
@@ -2196,13 +2283,6 @@ static int zotac_cfg_setup(struct zotac_device *zotac)
 	return 0;
 }
 
-/**
- * zotac_cfg_init - Initialize the device configuration system
- * @zotac: The zotac device to initialize
- *
- * This function sets up the configuration system and loads the initial
- * configuration from the device.
- */
 int zotac_cfg_init(struct zotac_device *zotac)
 {
 	int ret;
@@ -2213,9 +2293,8 @@ int zotac_cfg_init(struct zotac_device *zotac)
 
 	ret = zotac_cfg_refresh(zotac);
 	if (ret < 0) {
-		/* If refresh fails, still keep the structure but log an error */
 		dev_err(&zotac->hdev->dev,
-			"Failed to load initial configuration: %d\n", ret);
+				"Failed to load initial configuration: %d\n", ret);
 	}
 
 	return 0;

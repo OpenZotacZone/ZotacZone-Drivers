@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * HID driver for ZOTAC Gaming Zone Controller - RGB LED control
+ * HID driver for ZOTAC Gaming Zone Controller
  *
  * Copyright (c) 2025 Luke D. Jones <luke@ljones.dev>
+ * Modded by Pfahli
  */
 
 #ifndef __HID_ZOTAC_ZONE_H
@@ -14,7 +15,7 @@
 #include <linux/leds.h>
 #include <linux/led-class-multicolor.h>
 
-#define ZOTAC_VERSION "0.1.4"
+#define ZOTAC_VERSION "0.1.5"
 
 #define ZOTAC_VENDOR_ID 0x1ee9
 #define ZOTAC_ALT_VENDOR_ID 0x1e19
@@ -34,8 +35,8 @@
 #define CMD_SET_RGB 0xAD
 #define CMD_GET_RGB 0xAE
 
-#define ZOTAC_RGB_ZONE_COUNT 2 /* Number of physical zones (0 and 1) */
-#define ZOTAC_RGB_LEDS_PER_ZONE 10 /* Number of LEDs in each zone */
+#define ZOTAC_RGB_ZONE_COUNT 2
+#define ZOTAC_RGB_LEDS_PER_ZONE 10
 
 #define SENSITIVITY_POINT_COUNT 4
 
@@ -49,23 +50,23 @@
 #define MAX_MOUSE_BUTTONS 3
 
 #define DEVICE_ATTR_RO_NAMED(_name, _attr_name)               \
-	struct device_attribute dev_attr_##_name = {   \
-		.attr = { .name = _attr_name, .mode = 0444 }, \
-		.show = _name##_show,                         \
-	}
+struct device_attribute dev_attr_##_name = {   \
+	.attr = { .name = _attr_name, .mode = 0444 }, \
+	.show = _name##_show,                         \
+}
 
 #define DEVICE_ATTR_WO_NAMED(_name, _attr_name)               \
-	struct device_attribute dev_attr_##_name = {   \
-		.attr = { .name = _attr_name, .mode = 0200 }, \
-		.store = _name##_store,                       \
-	}
+struct device_attribute dev_attr_##_name = {   \
+	.attr = { .name = _attr_name, .mode = 0200 }, \
+	.store = _name##_store,                       \
+}
 
 #define DEVICE_ATTR_RW_NAMED(_name, _attr_name)               \
-	struct device_attribute dev_attr_##_name = {   \
-		.attr = { .name = _attr_name, .mode = 0644 }, \
-		.show = _name##_show,                         \
-		.store = _name##_store,                       \
-	}
+struct device_attribute dev_attr_##_name = {   \
+	.attr = { .name = _attr_name, .mode = 0644 }, \
+	.show = _name##_show,                         \
+	.store = _name##_store,                       \
+}
 
 enum qam_mode {
 	QAM_MODE_KEYBOARD = 0,
@@ -74,10 +75,25 @@ enum qam_mode {
 	QAM_MODE_LENGTH,
 };
 
+/* Dial Functions */
+enum zotac_dial_function {
+	DIAL_SCROLL = 0,        /* Vertical Scroll */
+	DIAL_SCROLL_INV,        /* Inverted Vertical Scroll */
+	DIAL_SCROLL_H,          /* Horizontal Scroll */
+	DIAL_VOLUME,            /* Volume Up/Down */
+	DIAL_BRIGHTNESS,        /* Brightness Up/Down */
+	DIAL_ARROWS_V,          /* Up/Down Keys */
+	DIAL_ARROWS_H,          /* Left/Right Keys */
+	DIAL_MEDIA,             /* Next/Prev Track */
+	DIAL_PAGE_SCROLL,       /* PageUp/PageDown */
+	DIAL_ZOOM,              /* Ctrl + Wheel */
+	DIAL_FUNC_MAX
+};
+
 struct zotac_gamepad {
-	struct input_dev *dev; /* input device interface */
-	struct zotac_device *zotac; /* back-pointer to parent zotac device */
-	bool disconnect; /* set when device disconnected */
+	struct input_dev *dev;
+	struct zotac_device *zotac;
+	bool disconnect;
 
 	struct usb_endpoint_descriptor *ep_in;
 	struct usb_endpoint_descriptor *ep_out;
@@ -120,16 +136,15 @@ struct zotac_rgb_data {
 		uint8_t red[ZOTAC_RGB_LEDS_PER_ZONE];
 		uint8_t green[ZOTAC_RGB_LEDS_PER_ZONE];
 		uint8_t blue[ZOTAC_RGB_LEDS_PER_ZONE];
-		uint8_t brightness; // MC LED class level brightness
+		uint8_t brightness;
 	} zone[ZOTAC_RGB_ZONE_COUNT];
-	uint8_t effect; // Global effect
-	uint8_t speed; // Global speed
-	uint8_t brightness; // Global brightness
+	uint8_t effect;
+	uint8_t speed;
+	uint8_t brightness;
 	bool initialized;
 };
 
 struct stick_sensitivity {
-	/* X1, Y1, X2, Y2, X3, Y3, X4, Y4 */
 	u8 values[SENSITIVITY_POINT_COUNT * 2];
 };
 
@@ -139,25 +154,29 @@ struct deadzone {
 };
 
 struct button_mapping {
-	u32 target_gamepad_buttons; /* Bit field for controller buttons */
-	u8 target_modifier_keys; /* Bit field for modifier keys */
-	u8 target_keyboard_keys[MAX_KEYBOARD_KEYS]; /* Array of keyboard key codes */
-	u8 target_mouse_buttons; /* Bit field for mouse buttons */
+	u32 target_gamepad_buttons;
+	u8 target_modifier_keys;
+	u8 target_keyboard_keys[MAX_KEYBOARD_KEYS];
+	u8 target_mouse_buttons;
 };
 
 struct zotac_cfg_data {
 	struct mutex command_mutex;
 	u8 sequence_num;
 	/* deadzones */
-	struct deadzone ls_dz; // left stick
-	struct deadzone rs_dz; // right stick
-	struct deadzone lt_dz; // left trigger
-	struct deadzone rt_dz; // right trigger
+	struct deadzone ls_dz;
+	struct deadzone rs_dz;
+	struct deadzone lt_dz;
+	struct deadzone rt_dz;
 	struct stick_sensitivity left_stick_sensitivity;
 	struct stick_sensitivity right_stick_sensitivity;
 	u8 button_turbo;
 	/* Indexed by the button number */
 	struct button_mapping button_mappings[BUTTON_MAX+1];
+
+	/* Dial configuration */
+	enum zotac_dial_function left_dial_func;
+	enum zotac_dial_function right_dial_func;
 };
 
 struct zotac_device {
@@ -173,19 +192,19 @@ struct zotac_device {
 extern struct zotac_device zotac;
 
 void zotac_init_input_device(struct input_dev *input_dev,
-			     struct hid_device *hdev, const char *name);
+							 struct hid_device *hdev, const char *name);
 
 struct usb_interface *zotac_get_usb_interface(struct hid_device *hdev);
 
 int zotac_init_gamepad(struct zotac_device *zotac, struct usb_interface *intf);
 
 void zotac_process_gamepad_report(struct zotac_device *zotac, u8 *data,
-				  int size);
+								  int size);
 
 void zotac_cleanup_gamepad(struct zotac_device *zotac);
 
 void zotac_gamepad_send_button(struct zotac_device *zotac, int buttons[],
-			       int num_buttons);
+							   int num_buttons);
 
 int zotac_cfg_init(struct zotac_device *zotac);
 
@@ -196,14 +215,14 @@ int zotac_register_sysfs(struct zotac_device *zotac);
 void zotac_unregister_sysfs(struct zotac_device *zotac);
 
 int zotac_send_get_command(struct zotac_device *zotac, u8 cmd_code, u8 setting,
-			   const u8 *req_data, size_t req_data_len,
-			   u8 *output_data, size_t *output_len);
+						   const u8 *req_data, size_t req_data_len,
+						   u8 *output_data, size_t *output_len);
 
 int zotac_send_set_command(struct zotac_device *zotac, u8 cmd_code, u8 setting,
-			   const u8 *data, size_t data_len);
+						   const u8 *data, size_t data_len);
 
 int zotac_send_get_byte(struct zotac_device *zotac, u8 cmd_code, u8 setting,
-			const u8 *req_data, size_t req_data_len);
+						const u8 *req_data, size_t req_data_len);
 
 /* RGB LED functions */
 int zotac_rgb_init(struct zotac_device *zotac);
