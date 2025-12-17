@@ -1,9 +1,10 @@
 #!/bin/bash
 # ==============================================================================
-#  ZOTAC ZONE LINUX DRIVER INSTALLER
+#  ZOTAC ZONE LINUX DRIVER INSTALLER (OpenZONE)
 # ==============================================================================
 #  Drivers by: flukejones (Luke D. Jones)
 #  Installer by: Pfahli
+#  Repository: OpenZotacZone/ZotacZone-Drivers
 # ==============================================================================
 
 # --- Colors & Formatting ---
@@ -16,11 +17,14 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # --- Configuration ---
-REPO_BRANCH="wip/zotac-zone-6.15"
-BASE_URL="https://raw.githubusercontent.com/flukejones/linux/${REPO_BRANCH}"
+# Updated URL structure based on your feedback
+REPO_RAW_BASE="https://raw.githubusercontent.com/OpenZotacZone/ZotacZone-Drivers/refs/heads/main"
 INSTALL_DIR="/usr/local/lib/zotac-zone"
 BUILD_DIR="/tmp/zotac_zone_build"
 SERVICE_NAME="zotac-zone-drivers.service"
+
+# Local source directory to check (relative to script execution)
+LOCAL_SRC_DIR="./driver"
 
 # --- Helper Functions ---
 log_header() { echo -e "\n${BLUE}${BOLD}:: $1${NC}"; }
@@ -34,10 +38,10 @@ print_banner() {
     echo -e "${CYAN}${BOLD}"
     echo "############################################################"
     echo "#                                                          #"
-    echo "#            ZOTAC ZONE DRIVER INSTALLER                   #"
+    echo "#        OPENZONE DRIVER INSTALLER (v1.1)                  #"
     echo "#                                                          #"
     echo "#   Target OS:   Bazzite / Fedora Atomic                   #"
-    echo "#   Drivers by:  flukejones                                #"
+    echo "#   Drivers:     flukejones                  #"
     echo "#   Script by:   Pfahli                                    #"
     echo "#                                                          #"
     echo "############################################################"
@@ -88,43 +92,72 @@ if [ ! -d "/lib/modules/$KERNEL_VER/build" ]; then
 fi
 log_success "Kernel headers, gcc, and make are present."
 
-# --- Step 3: Download ---
-log_header "Step 3/7: Downloading source code..."
-log_info "Fetching drivers from flukejones/linux ($REPO_BRANCH)..."
-
+# --- Step 3: Acquire Source ---
+log_header "Step 3/7: Acquiring source code..."
 mkdir -p $BUILD_DIR
-cd $BUILD_DIR
 
-# List of files to fetch
-files=(
-    "drivers/hid/zotac-zone-hid/zotac-zone-hid-core.c"
-    "drivers/hid/zotac-zone-hid/zotac-zone-hid-rgb.c"
-    "drivers/hid/zotac-zone-hid/zotac-zone-hid-input.c"
-    "drivers/hid/zotac-zone-hid/zotac-zone-hid-config.c"
-    "drivers/hid/zotac-zone-hid/zotac-zone.h"
-    "drivers/platform/x86/zotac-zone-platform.c"
-    "drivers/platform/x86/firmware_attributes_class.h"
-    "drivers/platform/x86/firmware_attributes_class.c"
+# Define file lists relative to their specific subdirectories
+HID_FILES=(
+    "zotac-zone-hid-core.c"
+    "zotac-zone-hid-rgb.c"
+    "zotac-zone-hid-input.c"
+    "zotac-zone-hid-config.c"
+    "zotac-zone.h"
 )
 
-for file in "${files[@]}"; do
-    filename=$(basename "$file")
-    # log_info "Downloading $filename..."
-    if wget -q "${BASE_URL}/$file"; then
+PLATFORM_FILES=(
+    "zotac-zone-platform.c"
+    "firmware_attributes_class.h"
+    "firmware_attributes_class.c"
+)
+
+# Logic: Check if local folder './driver' exists and has content
+if [ -d "$LOCAL_SRC_DIR/hid" ] && [ -d "$LOCAL_SRC_DIR/platform" ]; then
+    # --- LOCAL MODE ---
+    log_info "Found local 'driver' folder with hid/platform subdirs."
+    log_info "Using LOCAL files..."
+
+    # Copy HID files
+    for file in "${HID_FILES[@]}"; do
+        cp "$LOCAL_SRC_DIR/hid/$file" "$BUILD_DIR/" 2>/dev/null || { log_error "Missing local file: hid/$file"; exit 1; }
+    done
+
+    # Copy Platform files
+    for file in "${PLATFORM_FILES[@]}"; do
+        cp "$LOCAL_SRC_DIR/platform/$file" "$BUILD_DIR/" 2>/dev/null || { log_error "Missing local file: platform/$file"; exit 1; }
+    done
+
+    log_success "Local source files copied to build directory."
+else
+    # --- DOWNLOAD MODE ---
+    log_info "Local 'driver' folder not found (or incomplete)."
+    log_info "Downloading from OpenZotacZone/ZotacZone-Drivers..."
+
+    cd $BUILD_DIR
+
+    # Download HID files
+    log_info "Fetching HID drivers..."
+    for file in "${HID_FILES[@]}"; do
+        wget -q "${REPO_RAW_BASE}/driver/hid/$file" || { log_error "Failed to download $file"; exit 1; }
         echo -ne "."
-    else
-        echo ""
-        log_error "Failed to download $filename"
-        exit 1
-    fi
-done
-echo ""
-log_success "All source files downloaded successfully."
+    done
+    echo ""
+
+    # Download Platform files
+    log_info "Fetching Platform drivers..."
+    for file in "${PLATFORM_FILES[@]}"; do
+        wget -q "${REPO_RAW_BASE}/driver/platform/$file" || { log_error "Failed to download $file"; exit 1; }
+        echo -ne "."
+    done
+    echo ""
+    log_success "All source files downloaded successfully."
+fi
 
 # --- Step 4: Compile ---
 log_header "Step 4/7: Compiling drivers..."
-log_info "Building kernel modules (this may take a moment)..."
+log_info "Building kernel modules..."
 
+cd $BUILD_DIR
 cat > Makefile <<EOF
 obj-m += zotac-zone-hid.o
 zotac-zone-hid-y := zotac-zone-hid-core.o zotac-zone-hid-rgb.o zotac-zone-hid-input.o zotac-zone-hid-config.o
@@ -142,7 +175,7 @@ EOF
 if make > /dev/null; then
     log_success "Compilation successful."
 else
-    log_error "Compilation failed. Check usage of correct kernel headers."
+    log_error "Compilation failed."
     exit 1
 fi
 
@@ -155,7 +188,7 @@ cp zotac-zone-hid.ko $INSTALL_DIR/
 cp firmware_attributes_class.ko $INSTALL_DIR/
 cp zotac-zone-platform.ko $INSTALL_DIR/
 
-log_info "Applying SELinux security labels..."
+log_info "Applying SELinux labels..."
 if command -v chcon &> /dev/null; then
     if chcon -v -t modules_object_t $INSTALL_DIR/*.ko > /dev/null; then
         log_success "SELinux labels applied (Permission denied fix)."
@@ -171,7 +204,7 @@ log_header "Step 6/7: Configuring auto-start service..."
 
 cat > /etc/systemd/system/$SERVICE_NAME <<EOF
 [Unit]
-Description=Load Zotac Zone Drivers (flukejones)
+Description=Load Zotac Zone Drivers (OpenZONE)
 After=network.target
 
 [Service]
@@ -213,6 +246,6 @@ echo -e "\n${GREEN}============================================================$
 echo -e "${GREEN}${BOLD}             INSTALLATION COMPLETE!                         ${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo -e "   ${BOLD}Status:${NC}   Active & Running"
-echo -e "   ${BOLD}Control:${NC}  Your dials, RGB, and Fan control should work now."
-echo -e "   ${BOLD}Credits:${NC}  Driver by flukejones | Script by Pfahli"
+echo -e "   ${BOLD}Source:${NC}   $(if [ -d "$LOCAL_SRC_DIR/hid" ]; then echo "Local Files"; else echo "OpenZotacZone GitHub"; fi)"
+echo -e "   ${BOLD}Credits:${NC}  Drivers by flukejones | Script by Pfahli"
 echo -e "${GREEN}============================================================${NC}"
