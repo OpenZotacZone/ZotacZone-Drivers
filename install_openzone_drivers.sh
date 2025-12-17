@@ -41,7 +41,7 @@ print_banner() {
     echo "#        OPENZONE DRIVER INSTALLER (v1.1)                  #"
     echo "#                                                          #"
     echo "#   Target OS:   Bazzite / Fedora Atomic                   #"
-    echo "#   Drivers:     flukejones                  #"
+    echo "#   Drivers:     flukejones                                #"
     echo "#   Script by:   Pfahli                                    #"
     echo "#                                                          #"
     echo "############################################################"
