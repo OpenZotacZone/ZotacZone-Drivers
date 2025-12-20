@@ -2,7 +2,7 @@
 [![OpenZONE Discord](https://img.shields.io/badge/Discord-%235865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/YFhK768cex)
 ![License](https://img.shields.io/badge/license-GPL-blue.svg) ![Platform](https://img.shields.io/badge/platform-Linux-green.svg)
 
-**OpenZONE** is a complete driver suite for the **Zotac Zone** handheld gaming console running Linux (Bazzite, Fedora, SteamOS, etc.). It enables full hardware functionality including the Radial Dials, RGB lighting, and Back Buttons.
+**OpenZONE** is a complete driver suite for the **Zotac Zone** handheld gaming console running Bazzite or Fedora. It enables full hardware functionality including the Radial Dials, RGB lighting, Back Buttons and Fans.
 
 ## ✨ Features
 
@@ -18,33 +18,25 @@
 
 ## 🚀 Installation
 
-### Option 1: Quick Install (Online)
-The easiest way to install. Copy and run this command in your terminal. It will automatically download the necessary files, compile the drivers, and set up the services.
+To install the drivers and the manager, you only need to download and run the installer script.
 
-```bash
-curl -sL https://raw.githubusercontent.com/OpenZotacZone/ZotacZone-Drivers/main/install_openzone_drivers.sh | sudo bash
-```
-
-> **Note:** You will be prompted to run the **OpenZone Manager** immediately after installation.
-
-### Option 2: Manual Install (Offline)
-If you prefer to download the files manually or inspect the code first:
-
-1.  **Download** the repository (Zip) or clone it:
+1.  **Download the installer:**
+    You can download `install_openzone_drivers.sh` manually from the repository files, or use the command below:
     ```bash
-    git clone https://github.com/OpenZotacZone/ZotacZone-Drivers.git
-    cd ZotacZone-Drivers
+    wget https://raw.githubusercontent.com/OpenZotacZone/ZotacZone-Drivers/main/install_openzone_drivers.sh
     ```
 
-2.  **Make the script executable**:
+2.  **Make it executable:**
     ```bash
     chmod +x install_openzone_drivers.sh
     ```
 
-3.  **Run the installer**:
+3.  **Run the installer:**
     ```bash
     sudo ./install_openzone_drivers.sh
     ```
+
+The script will automatically compile the drivers, set up the services, and download the OpenZone Manager for you.
 
 ---
 
