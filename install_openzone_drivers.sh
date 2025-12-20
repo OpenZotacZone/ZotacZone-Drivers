@@ -27,13 +27,10 @@ DIAL_INSTALL_DIR="/usr/local/bin"
 DIAL_SCRIPT_NAME="zotac_dial_daemon.py"
 DIAL_SERVICE_NAME="zotac-dials.service"
 DIAL_SERVICE_PATH="/etc/systemd/system/$DIAL_SERVICE_NAME"
-# Udev Rule to hide dials from Steam
-UDEV_RULE_PATH="/etc/udev/rules.d/99-zotac-zone.rules"
 
 # Manager Config
 MANAGER_SCRIPT_NAME="openzone_manager.sh"
 MANAGER_SCRIPT_URL="${REPO_RAW_BASE}/openzone_manager.sh"
-
 START_DIR="$(pwd)"
 MANAGER_LOCAL_PATH="$START_DIR/$MANAGER_SCRIPT_NAME"
 LOCAL_SRC_DIR="$START_DIR/driver"
@@ -50,10 +47,10 @@ print_banner() {
     echo -e "${CYAN}${BOLD}"
     echo "############################################################"
     echo "#                                                          #"
-    echo "#        OPENZONE DRIVER INSTALLER (v1.9)                  #"
+    echo "#        OPENZONE DRIVER INSTALLER (v2.0)                  #"
     echo "#                                                          #"
     echo "#   Target OS:   Bazzite / Fedora Atomic                   #"
-    echo "#   Fixes:       Steam Gaming Mode Dial Support            #"
+    echo "#   Fixes:       Steam Gaming Mode (Raw HID Access)        #"
     echo "#                                                          #"
     echo "############################################################"
     echo -e "${NC}"
@@ -70,8 +67,6 @@ print_banner
 # --- Step 0: Disclaimer ---
 echo -e "${YELLOW}${BOLD}IMPORTANT NOTICE:${NC}"
 echo -e "This script installs custom Kernel Drivers and System Services."
-echo -e "It will modify system files and install a Udev rule to hide the"
-echo -e "dials from Steam so the custom driver can work."
 echo -e ""
 echo -e "${RED}DISCLAIMER:${NC} Software provided 'as is'. No warranty."
 echo -e "Developers are not responsible for instability or damage."
@@ -188,104 +183,154 @@ systemctl enable $SERVICE_NAME > /dev/null
 systemctl restart $SERVICE_NAME
 log_success "Kernel Drivers Active."
 
-# --- Step 6: Install Dial Daemon (UPDATED) ---
-log_header "Step 6/8: Installing Dial Daemon (Steam Fix)..."
+# --- Step 6: Install Dial Daemon (HIDRAW FIX) ---
+log_header "Step 6/8: Installing Dial Daemon (Raw Access)..."
 mkdir -p $DIAL_INSTALL_DIR
 
-# 1. Create Udev Rule to hide physical dials from Steam
-log_info "Creating Udev Rule to prevent Steam Input grab..."
-cat > "$UDEV_RULE_PATH" <<EOF
-# Zotac Zone Dials - Hide from Steam/Seat, allow root/daemon access
-# This prevents "Device busy" errors in Gaming Mode
-KERNEL=="event*", ATTRS{name}=="ZOTAC Gaming Zone Dials", ENV{LIBINPUT_IGNORE_DEVICE}="1", ENV{ID_INPUT}="0"
+# 1. Udev Rule (Still useful for permission safety)
+cat > "/etc/udev/rules.d/99-zotac-zone.rules" <<EOF
+KERNEL=="hidraw*", ATTRS{idVendor}=="1ee9", ATTRS{idProduct}=="1590", MODE="0666"
 EOF
 udevadm control --reload-rules && udevadm trigger
 
-# 2. Generate Python Script (With Retry Logic)
+# 2. Generate Python Script (HIDRAW Based)
 cat << 'EOF' > "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME"
 #!/usr/bin/env python3
-import evdev
-import argparse
+# Zotac Zone Dial Daemon (Raw HID + Backlight Fix)
+import os
 import sys
+import glob
 import time
+import argparse
 from evdev import UInput, ecodes as e
 
+# --- ARGS ---
 parser = argparse.ArgumentParser()
 parser.add_argument("--left", default="volume")
 parser.add_argument("--right", default="brightness")
 args = parser.parse_args()
 
-TARGET_NAME = "ZOTAC Gaming Zone Dials"
+# --- CONSTANTS ---
+VID = "1EE9"
+PID = "1590"
 
+# --- ACTION MAP ---
 ACTIONS = {
-    "volume":            ([e.KEY_VOLUMEUP, e.KEY_VOLUMEDOWN], None, None, 1),
-    "brightness":        ([e.KEY_BRIGHTNESSUP, e.KEY_BRIGHTNESSDOWN], None, None, 1),
-    "scroll":            (None, None, e.REL_WHEEL, 1),
-    "scroll_inverted":   (None, None, e.REL_WHEEL, -1),
-    "scroll_horizontal": (None, None, e.REL_HWHEEL, 1),
-    "arrows_vertical":   ([e.KEY_UP, e.KEY_DOWN], None, None, 1),
-    "arrows_horizontal": ([e.KEY_RIGHT, e.KEY_LEFT], None, None, 1),
-    "page_scroll":       ([e.KEY_PAGEUP, e.KEY_PAGEDOWN], None, None, 1),
-    "media":             ([e.KEY_NEXTSONG, e.KEY_PREVIOUSSONG], None, None, 1),
-    "zoom":              (None, e.KEY_LEFTCTRL, e.REL_WHEEL, 1),
+    "volume":            {"type": "key", "up": e.KEY_VOLUMEUP, "down": e.KEY_VOLUMEDOWN},
+    "brightness":        {"type": "backlight", "step": 5},
+    "scroll":            {"type": "rel", "axis": e.REL_WHEEL, "up": 1, "down": -1},
+    "scroll_inverted":   {"type": "rel", "axis": e.REL_WHEEL, "up": -1, "down": 1},
+    "arrows_vertical":   {"type": "key", "up": e.KEY_UP, "down": e.KEY_DOWN},
+    "arrows_horizontal": {"type": "key", "up": e.KEY_RIGHT, "down": e.KEY_LEFT},
+    "media":             {"type": "key", "up": e.KEY_NEXTSONG, "down": e.KEY_PREVIOUSSONG},
+    "page_scroll":       {"type": "key", "up": e.KEY_PAGEUP, "down": e.KEY_PAGEDOWN},
+    "zoom":              {"type": "key", "up": e.KEY_ZOOMIN, "down": e.KEY_ZOOMOUT}, 
 }
 
-cap = {
-    e.EV_KEY: [e.KEY_VOLUMEUP, e.KEY_VOLUMEDOWN, e.KEY_BRIGHTNESSUP, e.KEY_BRIGHTNESSDOWN,
-               e.KEY_UP, e.KEY_DOWN, e.KEY_LEFT, e.KEY_RIGHT, e.KEY_PAGEUP, e.KEY_PAGEDOWN,
-               e.KEY_NEXTSONG, e.KEY_PREVIOUSSONG, e.KEY_LEFTCTRL],
-    e.EV_REL: [e.REL_WHEEL, e.REL_HWHEEL]
-}
+# --- HELPERS ---
+def find_backlight():
+    # Prefer amdgpu for handhelds
+    paths = glob.glob("/sys/class/backlight/*")
+    if not paths: return None
+    paths.sort(key=lambda x: "amdgpu" not in x)
+    return paths[0]
 
-try:
-    ui = UInput(cap, name="Zotac Zone Virtual Dials", version=0x3)
-except Exception as err:
-    print(f"UInput Error: {err}")
-    sys.exit(1)
+def set_backlight(path, direction, step_pct):
+    try:
+        mf = os.path.join(path, "max_brightness")
+        vf = os.path.join(path, "brightness")
+        with open(mf, "r") as f: max_v = int(f.read().strip())
+        with open(vf, "r") as f: cur_v = int(f.read().strip())
+        
+        step = max(1, int(max_v * (step_pct / 100.0)))
+        new_v = cur_v + step if direction == "up" else cur_v - step
+        new_v = max(0, min(new_v, max_v))
+        
+        with open(vf, "w") as f: f.write(str(new_v))
+    except Exception as e:
+        print(f"Backlight Err: {e}")
 
-def handle_event(mode, value):
-    if mode not in ACTIONS: return
-    keys, mod, rel, mult = ACTIONS[mode]
-    if rel:
-        if mod: ui.write(e.EV_KEY, mod, 1)
-        ui.write(e.EV_REL, rel, value * mult)
-        if mod: ui.write(e.EV_KEY, mod, 0)
-    elif keys:
-        k = keys[0] if value > 0 else keys[1]
-        ui.write(e.EV_KEY, k, 1)
-        ui.write(e.EV_KEY, k, 0)
-    ui.syn()
-
-def main_loop():
-    print(f"Daemon Started. L:{args.left} R:{args.right}")
-    while True:
+def find_hidraw():
+    for p in glob.glob("/sys/class/hidraw/hidraw*"):
         try:
-            device = None
-            for dev in [evdev.InputDevice(p) for p in evdev.list_devices()]:
-                if TARGET_NAME in dev.name:
-                    device = dev
-                    break
-            
-            if device:
-                # Retry grab if busy (Steam conflict)
-                try:
-                    device.grab()
-                    print(f"Grabbed: {device.name}")
-                    for event in device.read_loop():
-                        if event.type == e.EV_REL:
-                            if event.code == e.REL_HWHEEL: handle_event(args.left, event.value)
-                            elif event.code == e.REL_WHEEL: handle_event(args.right, event.value)
-                except OSError:
-                    print("Device busy. Steam might have grabbed it. Retrying...")
-                    time.sleep(2)
-            else:
-                time.sleep(3)
-        except Exception as err:
-            print(f"Loop Error: {err}")
+            with open(os.path.join(p, "device/uevent"), "r") as f:
+                c = f.read().upper()
+                if f"HID_ID={VID}:{PID}" in c or (f"PRODUCT={VID}/{PID}" in c):
+                    return f"/dev/{os.path.basename(p)}"
+        except: continue
+    return None
+
+# --- MAIN ---
+def main():
+    print(f"Dial Daemon (Raw). L:{args.left} R:{args.right}")
+    backlight = find_backlight()
+    print(f"Backlight: {backlight}")
+    
+    # Setup UInput
+    cap = {e.EV_KEY: [], e.EV_REL: [e.REL_WHEEL]}
+    for a in ACTIONS.values():
+        if a["type"] == "key": cap[e.EV_KEY].extend([a["up"], a["down"]])
+        elif a["type"] == "rel": cap[e.EV_REL].append(a["axis"])
+        
+    try:
+        ui = UInput(cap, name="Zotac Zone Virtual Dials")
+    except:
+        print("UInput Fail. Need root?")
+        sys.exit(1)
+
+    while True:
+        dev_path = find_hidraw()
+        if not dev_path:
             time.sleep(3)
+            continue
+            
+        print(f"Reading {dev_path}...")
+        try:
+            with open(dev_path, "rb") as f:
+                while True:
+                    data = f.read(64)
+                    if not data: break
+                    if len(data) < 4: continue
+                    
+                    # Parse Report
+                    # [0]=ReportID(03) [3]=Trigger
+                    if data[0] != 0x03: continue
+                    trig = data[3]
+                    if trig == 0x00: continue
+                    
+                    # Decode
+                    action_conf = None
+                    direction = None
+                    
+                    if trig == 0x10: action_conf, direction = ACTIONS.get(args.left), "down"
+                    elif trig == 0x08: action_conf, direction = ACTIONS.get(args.left), "up"
+                    elif trig == 0x02: action_conf, direction = ACTIONS.get(args.right), "down"
+                    elif trig == 0x01: action_conf, direction = ACTIONS.get(args.right), "up"
+                    
+                    if not action_conf: continue
+                    
+                    # Execute
+                    atype = action_conf["type"]
+                    if atype == "backlight" and backlight:
+                        set_backlight(backlight, direction, action_conf["step"])
+                    elif atype == "key":
+                        k = action_conf[direction]
+                        ui.write(e.EV_KEY, k, 1)
+                        ui.write(e.EV_KEY, k, 0)
+                        ui.syn()
+                    elif atype == "rel":
+                        ui.write(e.EV_REL, action_conf["axis"], action_conf[direction])
+                        ui.syn()
+                        
+        except OSError:
+            print("Device disconnected.")
+            time.sleep(2)
+        except Exception as err:
+            print(f"Error: {err}")
+            time.sleep(2)
 
 if __name__ == "__main__":
-    main_loop()
+    main()
 EOF
 chmod +x "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME"
 
@@ -307,7 +352,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable "$DIAL_SERVICE_NAME" > /dev/null
-log_success "Dial Daemon Installed & Udev Rule Applied."
+log_success "Dial Daemon Installed (Raw HID)."
 
 # --- Step 7: Launch Dials ---
 log_header "Step 7/8: Starting Services..."
@@ -352,7 +397,7 @@ echo -e "\n${GREEN}============================================================$
 echo -e "${GREEN}${BOLD}             INSTALLATION COMPLETE!                         ${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo -e "   ${BOLD}Kernel Drivers:${NC} Active"
-echo -e "   ${BOLD}Dial Service:${NC}   Active (Steam Fix Applied)"
+echo -e "   ${BOLD}Dial Service:${NC}   Active (Raw Access)"
 if [ "$CC_INSTALLED" = true ]; then
     echo -e "   ${BOLD}CoolerControl:${NC}  ${YELLOW}Installed/Queued${NC} (Reboot required)"
 fi
