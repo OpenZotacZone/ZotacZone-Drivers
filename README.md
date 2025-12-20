@@ -36,6 +36,8 @@ To install the drivers and the manager, you only need to download and run the in
     sudo ./install_openzone_drivers.sh
     ```
 
+![Installer Interface](/img/openzone_installer.png)
+
 The script will automatically compile the drivers, set up the services, and download the OpenZone Manager for you.
 
 ---
@@ -49,6 +51,8 @@ Once installed, you can configure your device settings (RGB, Dials, Mappings) us
 sudo ./openzone_manager.sh
 ```
 *(If you are in the directory where it was downloaded. If you moved it to a bin folder, just run the command).*
+
+![Installer Interface](/img/openzone_manager.png)
 
 ### Manager Features:
 1.  **Back Buttons (M1/M2):** Map them to keys like `Space`, `Enter`, or gamepad buttons like `A`, `B`.
