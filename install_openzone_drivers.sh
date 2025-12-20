@@ -14,7 +14,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # --- Configuration ---
 REPO_RAW_BASE="https://raw.githubusercontent.com/OpenZotacZone/ZotacZone-Drivers/refs/heads/main"
@@ -22,22 +22,20 @@ INSTALL_DIR="/usr/local/lib/zotac-zone"
 BUILD_DIR="/tmp/zotac_zone_build"
 SERVICE_NAME="zotac-zone-drivers.service"
 
-# Dial Configuration
-DIAL_SCRIPT_URL="${REPO_RAW_BASE}/driver/dials/zotac_dial_daemon.py"
+# Dial Config
 DIAL_INSTALL_DIR="/usr/local/bin"
 DIAL_SCRIPT_NAME="zotac_dial_daemon.py"
 DIAL_SERVICE_NAME="zotac-dials.service"
 DIAL_SERVICE_PATH="/etc/systemd/system/$DIAL_SERVICE_NAME"
+# Udev Rule to hide dials from Steam
+UDEV_RULE_PATH="/etc/udev/rules.d/99-zotac-zone.rules"
 
-# Manager Configuration
+# Manager Config
 MANAGER_SCRIPT_NAME="openzone_manager.sh"
 MANAGER_SCRIPT_URL="${REPO_RAW_BASE}/openzone_manager.sh"
 
-# Save starting directory to return to later
 START_DIR="$(pwd)"
 MANAGER_LOCAL_PATH="$START_DIR/$MANAGER_SCRIPT_NAME"
-
-# Local source directory to check
 LOCAL_SRC_DIR="$START_DIR/driver"
 
 # --- Helper Functions ---
@@ -52,17 +50,15 @@ print_banner() {
     echo -e "${CYAN}${BOLD}"
     echo "############################################################"
     echo "#                                                          #"
-    echo "#        OPENZONE DRIVER INSTALLER (v1.8)                  #"
+    echo "#        OPENZONE DRIVER INSTALLER (v1.9)                  #"
     echo "#                                                          #"
     echo "#   Target OS:   Bazzite / Fedora Atomic                   #"
-    echo "#   Drivers:     flukejones                                #"
-    echo "#   Script by:   Pfahli                                    #"
+    echo "#   Fixes:       Steam Gaming Mode Dial Support            #"
     echo "#                                                          #"
     echo "############################################################"
     echo -e "${NC}"
 }
 
-# --- Root Check ---
 if [ "$EUID" -ne 0 ]; then
    log_error "This script must be run as root."
    echo -e "   Please run: ${BOLD}sudo $0${NC}"
@@ -71,26 +67,22 @@ fi
 
 print_banner
 
-# --- Step 0: Disclaimer & Confirmation ---
+# --- Step 0: Disclaimer ---
 echo -e "${YELLOW}${BOLD}IMPORTANT NOTICE:${NC}"
-echo -e "This script will download, compile, and install Kernel Drivers and System Services"
-echo -e "specifically for the Zotac Zone handheld. It modifies system files."
+echo -e "This script installs custom Kernel Drivers and System Services."
+echo -e "It will modify system files and install a Udev rule to hide the"
+echo -e "dials from Steam so the custom driver can work."
 echo -e ""
-echo -e "${RED}DISCLAIMER:${NC} This software is provided 'as is' without warranty of any kind,"
-echo -e "express or implied. The developers (flukejones, Pfahli, OpenZone community)"
-echo -e "are NOT responsible for any system instability, data loss, or hardware damage."
-echo -e ""
-echo -n -e "${GREEN}Do you accept these terms and wish to proceed? [y/N]: ${NC}"
+echo -e "${RED}DISCLAIMER:${NC} Software provided 'as is'. No warranty."
+echo -e "Developers are not responsible for instability or damage."
+echo -n -e "${GREEN}Do you proceed? [y/N]: ${NC}"
 read -r confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-    echo -e "\n${RED}Installation Aborted.${NC}"
-    exit 0
+    echo -e "\n${RED}Aborted.${NC}"; exit 0
 fi
 
 # --- Step 1: Cleanup ---
-log_header "Step 1/8: Cleaning up old installations..."
-log_info "Stopping services and unloading modules..."
-
+log_header "Step 1/8: Cleaning up..."
 systemctl stop $SERVICE_NAME 2>/dev/null || true
 systemctl disable $SERVICE_NAME 2>/dev/null || true
 rm -f /etc/systemd/system/$SERVICE_NAME
@@ -99,33 +91,24 @@ systemctl stop $DIAL_SERVICE_NAME 2>/dev/null || true
 systemctl disable $DIAL_SERVICE_NAME 2>/dev/null || true
 rm -f $DIAL_SERVICE_PATH
 
-# Unload modules
 rmmod zotac_zone_platform 2>/dev/null || true
 rmmod zotac_zone_platform_driver 2>/dev/null || true
 rmmod firmware_attributes_class 2>/dev/null || true
 rmmod zotac_zone_hid 2>/dev/null || true
 
-# Clean directories
 rm -rf $INSTALL_DIR
 rm -rf $BUILD_DIR
-
-systemctl daemon-reload
-log_success "System clean. Ready for fresh install."
+log_success "Cleaned."
 
 # --- Step 2: Prerequisites ---
-log_header "Step 2/8: Checking system prerequisites..."
+log_header "Step 2/8: Checking prerequisites..."
 KERNEL_VER=$(uname -r)
-log_info "Detected Kernel: $KERNEL_VER"
-
 if [ ! -d "/lib/modules/$KERNEL_VER/build" ]; then
-    log_error "Kernel headers are missing!"
-    echo -e "\n   ${YELLOW}Action Required:${NC}"
-    echo -e "   Please run this command and then reboot:"
-    echo -e "   ${BOLD}rpm-ostree install kernel-devel-$KERNEL_VER gcc make${NC}"
+    log_error "Kernel headers missing!"
+    echo -e "   Run: ${BOLD}rpm-ostree install kernel-devel-$KERNEL_VER gcc make${NC}"
     exit 1
 fi
 
-# Check Python Evdev
 if ! python3 -c "import evdev" &> /dev/null; then
     log_info "Installing python-evdev..."
     if command -v rpm-ostree &> /dev/null; then
@@ -137,34 +120,30 @@ if ! python3 -c "import evdev" &> /dev/null; then
     fi
 fi
 
-# Ensure uinput
 modprobe uinput
 echo "uinput" > /etc/modules-load.d/zotac-uinput.conf
-log_success "Prerequisites check passed."
+log_success "Prerequisites OK."
 
-# --- Step 3: Acquire Kernel Source ---
-log_header "Step 3/8: Acquiring Kernel Driver source..."
+# --- Step 3: Source ---
+log_header "Step 3/8: Acquiring Source..."
 mkdir -p $BUILD_DIR
 
 HID_FILES=("zotac-zone-hid-core.c" "zotac-zone-hid-rgb.c" "zotac-zone-hid-input.c" "zotac-zone-hid-config.c" "zotac-zone.h")
 PLATFORM_FILES=("zotac-zone-platform.c" "firmware_attributes_class.h" "firmware_attributes_class.c")
 
-if [ -d "$LOCAL_SRC_DIR/hid" ] && [ -d "$LOCAL_SRC_DIR/platform" ]; then
-    log_info "Found local 'driver' folder. Using local files..."
-    for file in "${HID_FILES[@]}"; do cp "$LOCAL_SRC_DIR/hid/$file" "$BUILD_DIR/" 2>/dev/null || { log_error "Missing $file"; exit 1; }; done
-    for file in "${PLATFORM_FILES[@]}"; do cp "$LOCAL_SRC_DIR/platform/$file" "$BUILD_DIR/" 2>/dev/null || { log_error "Missing $file"; exit 1; }; done
-    log_success "Local source copied."
+if [ -d "$LOCAL_SRC_DIR/hid" ]; then
+    log_info "Using local files."
+    for f in "${HID_FILES[@]}"; do cp "$LOCAL_SRC_DIR/hid/$f" "$BUILD_DIR/" 2>/dev/null; done
+    for f in "${PLATFORM_FILES[@]}"; do cp "$LOCAL_SRC_DIR/platform/$f" "$BUILD_DIR/" 2>/dev/null; done
 else
-    log_info "Downloading from OpenZotacZone GitHub..."
+    log_info "Downloading from GitHub..."
     cd $BUILD_DIR
-    for file in "${HID_FILES[@]}"; do wget -q "${REPO_RAW_BASE}/driver/hid/$file" || { log_error "Download failed: $file"; exit 1; }; echo -ne "."; done
-    for file in "${PLATFORM_FILES[@]}"; do wget -q "${REPO_RAW_BASE}/driver/platform/$file" || { log_error "Download failed: $file"; exit 1; }; echo -ne "."; done
-    echo ""
-    log_success "Download complete."
+    for f in "${HID_FILES[@]}"; do wget -q "${REPO_RAW_BASE}/driver/hid/$f"; done
+    for f in "${PLATFORM_FILES[@]}"; do wget -q "${REPO_RAW_BASE}/driver/platform/$f"; done
 fi
 
 # --- Step 4: Compile ---
-log_header "Step 4/8: Compiling Kernel Drivers..."
+log_header "Step 4/8: Compiling..."
 cd $BUILD_DIR
 cat > Makefile <<EOF
 obj-m += zotac-zone-hid.o
@@ -177,22 +156,14 @@ clean:
 	make -C /lib/modules/\$(shell uname -r)/build M=\$(PWD) clean
 EOF
 
-if make > /dev/null; then
-    log_success "Compilation successful."
-else
-    log_error "Compilation failed."
-    exit 1
-fi
+make > /dev/null || { log_error "Compile failed."; exit 1; }
+log_success "Compiled."
 
 # --- Step 5: Install Kernel Drivers ---
 log_header "Step 5/8: Installing Kernel Drivers..."
 mkdir -p $INSTALL_DIR
 cp *.ko $INSTALL_DIR/
-
-# SELinux Fix
-if command -v chcon &> /dev/null; then
-    chcon -v -t modules_object_t $INSTALL_DIR/*.ko > /dev/null 2>&1
-fi
+[ -x "$(command -v chcon)" ] && chcon -v -t modules_object_t $INSTALL_DIR/*.ko >/dev/null 2>&1
 
 cat > /etc/systemd/system/$SERVICE_NAME <<EOF
 [Unit]
@@ -215,32 +186,110 @@ EOF
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME > /dev/null
 systemctl restart $SERVICE_NAME
+log_success "Kernel Drivers Active."
 
-if systemctl is-active --quiet $SERVICE_NAME; then
-    log_success "Kernel Drivers loaded."
-else
-    log_error "Failed to load Kernel Drivers."
-    journalctl -xeu $SERVICE_NAME --no-pager | tail -n 5
-    exit 1
-fi
-
-# --- Step 6: Install Dial Daemon ---
-log_header "Step 6/8: Installing Dial Daemon..."
+# --- Step 6: Install Dial Daemon (UPDATED) ---
+log_header "Step 6/8: Installing Dial Daemon (Steam Fix)..."
 mkdir -p $DIAL_INSTALL_DIR
 
-log_info "Downloading Dial Daemon from GitHub..."
-wget -q -O "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME" "$DIAL_SCRIPT_URL"
+# 1. Create Udev Rule to hide physical dials from Steam
+log_info "Creating Udev Rule to prevent Steam Input grab..."
+cat > "$UDEV_RULE_PATH" <<EOF
+# Zotac Zone Dials - Hide from Steam/Seat, allow root/daemon access
+# This prevents "Device busy" errors in Gaming Mode
+KERNEL=="event*", ATTRS{name}=="ZOTAC Gaming Zone Dials", ENV{LIBINPUT_IGNORE_DEVICE}="1", ENV{ID_INPUT}="0"
+EOF
+udevadm control --reload-rules && udevadm trigger
 
-if [ -f "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME" ]; then
-    chmod +x "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME"
-    log_success "Dial Daemon installed."
-else
-    log_error "Failed to download Dial Daemon."
-    exit 1
-fi
+# 2. Generate Python Script (With Retry Logic)
+cat << 'EOF' > "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME"
+#!/usr/bin/env python3
+import evdev
+import argparse
+import sys
+import time
+from evdev import UInput, ecodes as e
 
-log_info "Setting up Service with defaults (Left: Volume, Right: Brightness)..."
+parser = argparse.ArgumentParser()
+parser.add_argument("--left", default="volume")
+parser.add_argument("--right", default="brightness")
+args = parser.parse_args()
 
+TARGET_NAME = "ZOTAC Gaming Zone Dials"
+
+ACTIONS = {
+    "volume":            ([e.KEY_VOLUMEUP, e.KEY_VOLUMEDOWN], None, None, 1),
+    "brightness":        ([e.KEY_BRIGHTNESSUP, e.KEY_BRIGHTNESSDOWN], None, None, 1),
+    "scroll":            (None, None, e.REL_WHEEL, 1),
+    "scroll_inverted":   (None, None, e.REL_WHEEL, -1),
+    "scroll_horizontal": (None, None, e.REL_HWHEEL, 1),
+    "arrows_vertical":   ([e.KEY_UP, e.KEY_DOWN], None, None, 1),
+    "arrows_horizontal": ([e.KEY_RIGHT, e.KEY_LEFT], None, None, 1),
+    "page_scroll":       ([e.KEY_PAGEUP, e.KEY_PAGEDOWN], None, None, 1),
+    "media":             ([e.KEY_NEXTSONG, e.KEY_PREVIOUSSONG], None, None, 1),
+    "zoom":              (None, e.KEY_LEFTCTRL, e.REL_WHEEL, 1),
+}
+
+cap = {
+    e.EV_KEY: [e.KEY_VOLUMEUP, e.KEY_VOLUMEDOWN, e.KEY_BRIGHTNESSUP, e.KEY_BRIGHTNESSDOWN,
+               e.KEY_UP, e.KEY_DOWN, e.KEY_LEFT, e.KEY_RIGHT, e.KEY_PAGEUP, e.KEY_PAGEDOWN,
+               e.KEY_NEXTSONG, e.KEY_PREVIOUSSONG, e.KEY_LEFTCTRL],
+    e.EV_REL: [e.REL_WHEEL, e.REL_HWHEEL]
+}
+
+try:
+    ui = UInput(cap, name="Zotac Zone Virtual Dials", version=0x3)
+except Exception as err:
+    print(f"UInput Error: {err}")
+    sys.exit(1)
+
+def handle_event(mode, value):
+    if mode not in ACTIONS: return
+    keys, mod, rel, mult = ACTIONS[mode]
+    if rel:
+        if mod: ui.write(e.EV_KEY, mod, 1)
+        ui.write(e.EV_REL, rel, value * mult)
+        if mod: ui.write(e.EV_KEY, mod, 0)
+    elif keys:
+        k = keys[0] if value > 0 else keys[1]
+        ui.write(e.EV_KEY, k, 1)
+        ui.write(e.EV_KEY, k, 0)
+    ui.syn()
+
+def main_loop():
+    print(f"Daemon Started. L:{args.left} R:{args.right}")
+    while True:
+        try:
+            device = None
+            for dev in [evdev.InputDevice(p) for p in evdev.list_devices()]:
+                if TARGET_NAME in dev.name:
+                    device = dev
+                    break
+            
+            if device:
+                # Retry grab if busy (Steam conflict)
+                try:
+                    device.grab()
+                    print(f"Grabbed: {device.name}")
+                    for event in device.read_loop():
+                        if event.type == e.EV_REL:
+                            if event.code == e.REL_HWHEEL: handle_event(args.left, event.value)
+                            elif event.code == e.REL_WHEEL: handle_event(args.right, event.value)
+                except OSError:
+                    print("Device busy. Steam might have grabbed it. Retrying...")
+                    time.sleep(2)
+            else:
+                time.sleep(3)
+        except Exception as err:
+            print(f"Loop Error: {err}")
+            time.sleep(3)
+
+if __name__ == "__main__":
+    main_loop()
+EOF
+chmod +x "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME"
+
+# 3. Create Service
 cat > "$DIAL_SERVICE_PATH" <<EOF
 [Unit]
 Description=Zotac Zone Dial Daemon
@@ -248,7 +297,6 @@ After=multi-user.target
 
 [Service]
 Type=simple
-# Defaults: Left=Volume, Right=Brightness
 ExecStart=/usr/bin/python3 $DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME --left volume --right brightness
 Restart=always
 RestartSec=5
@@ -259,98 +307,70 @@ EOF
 
 systemctl daemon-reload
 systemctl enable "$DIAL_SERVICE_NAME" > /dev/null
-log_success "Dial Service Installed."
+log_success "Dial Daemon Installed & Udev Rule Applied."
 
 # --- Step 7: Launch Dials ---
 log_header "Step 7/8: Starting Services..."
 systemctl restart "$DIAL_SERVICE_NAME"
-
 if systemctl is-active --quiet "$DIAL_SERVICE_NAME"; then
-    log_success "Dial Service is running!"
+    log_success "Dial Service Running."
 else
-    log_warn "Dial Service failed to start. Check logs."
+    log_warn "Dial Service failed start. Check logs."
 fi
 
 # --- Step 8: Optional CoolerControl ---
 log_header "Step 8/8: Additional Software"
-echo -e "${PURPLE}:: Fan Control Configuration ::${NC}"
-
 CC_INSTALLED=false
-
-# Check if already installed
 if command -v coolercontrol &> /dev/null; then
-    log_info "CoolerControl is already installed."
+    log_info "CoolerControl already installed."
     CC_INSTALLED=true
 else
-    echo -e "Would you like to install ${BOLD}CoolerControl${NC}?"
-    echo -e "It allows you to configure the fan curve (optional, but recommended)."
-    echo -n -e "${GREEN}>> Install CoolerControl? [y/N]: ${NC}"
+    echo -e "Install ${BOLD}CoolerControl${NC} for Fan Curves? (Recommended)"
+    echo -n -e "${GREEN}>> Install? [y/N]: ${NC}"
     read -r cc_choice
-
     if [[ "$cc_choice" =~ ^[Yy]$ ]]; then
         if command -v rpm-ostree &> /dev/null; then
-            log_info "Detected Bazzite/Atomic. Adding COPR Repo..."
+            log_info "Bazzite/Atomic detected. Adding COPR..."
             wget -q https://copr.fedorainfracloud.org/coprs/codifryed/CoolerControl/repo/fedora-$(rpm -E %fedora)/codifryed-CoolerControl-fedora-$(rpm -E %fedora).repo -O /etc/yum.repos.d/_copr_codifryed-CoolerControl.repo
-            log_info "Queuing CoolerControl installation..."
             rpm-ostree install coolercontrol
             CC_INSTALLED=true
         elif command -v dnf &> /dev/null; then
-            log_info "Detected Fedora/RHEL. Installing..."
             dnf copr enable -y codifryed/CoolerControl
             dnf install -y coolercontrol
             systemctl enable --now coolercontrold
             CC_INSTALLED=true
-        else
-            log_warn "Could not detect a supported package manager for CoolerControl."
-            echo "Please visit: https://gitlab.com/coolercontrol/coolercontrol"
         fi
-    else
-        log_info "Skipping CoolerControl."
     fi
 fi
 
-# --- Cleanup ---
-# Return to start directory BEFORE deleting build dir
+# Cleanup
 cd "$START_DIR" || exit 1
 rm -rf $BUILD_DIR
 
-# --- Summary & Manager Prompt ---
+# --- Summary ---
 echo -e "\n${GREEN}============================================================${NC}"
 echo -e "${GREEN}${BOLD}             INSTALLATION COMPLETE!                         ${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo -e "   ${BOLD}Kernel Drivers:${NC} Active"
-echo -e "   ${BOLD}Dial Service:${NC}   Active (Defaults: Vol/Bright)"
+echo -e "   ${BOLD}Dial Service:${NC}   Active (Steam Fix Applied)"
 if [ "$CC_INSTALLED" = true ]; then
-    echo -e "   ${BOLD}CoolerControl:${NC}  ${YELLOW}Installed / Queued${NC}"
-    if command -v rpm-ostree &> /dev/null && [[ "$cc_choice" =~ ^[Yy]$ ]]; then
-        echo -e "   ${RED}IMPORTANT:${NC} Reboot required to finish CoolerControl install."
-    fi
-    echo -e "              Launch 'CoolerControl' from your app menu to configure fans."
+    echo -e "   ${BOLD}CoolerControl:${NC}  ${YELLOW}Installed/Queued${NC} (Reboot required)"
 fi
 echo -e "${GREEN}============================================================${NC}"
 
 if [ ! -f "$MANAGER_LOCAL_PATH" ]; then
-    log_info "Downloading OpenZone Manager ($MANAGER_SCRIPT_NAME)..."
+    log_info "Downloading OpenZone Manager..."
     wget -q -O "$MANAGER_LOCAL_PATH" "$MANAGER_SCRIPT_URL"
-    if [ -f "$MANAGER_LOCAL_PATH" ]; then
-        chmod +x "$MANAGER_LOCAL_PATH"
-        log_success "Manager downloaded to $MANAGER_LOCAL_PATH"
-    else
-        log_warn "Could not download manager. Check internet."
-    fi
+    chmod +x "$MANAGER_LOCAL_PATH"
 fi
 
 if [ -f "$MANAGER_LOCAL_PATH" ]; then
-    echo -e "\n${BOLD}${CYAN}Would you like to run the OpenZone Manager now?${NC}"
-    echo -e "Configure: Buttons, RGB, Dials, Deadzones."
-    echo -n -e "${GREEN}>> Run Manager? [Y/n]: ${NC}"
+    echo -e "\n${BOLD}${CYAN}Run OpenZone Manager now?${NC}"
+    echo -n -e "${GREEN}>> [Y/n]: ${NC}"
     read -r choice
     if [[ ! "$choice" =~ ^[Nn]$ ]]; then
-        chmod +x "$MANAGER_LOCAL_PATH"
         exec "$MANAGER_LOCAL_PATH"
     else
-        echo -e "\nOK. Run it later: ${BOLD}sudo $MANAGER_LOCAL_PATH${NC}"
+        echo -e "\nRun later: ${BOLD}sudo $MANAGER_LOCAL_PATH${NC}"
     fi
-else
-    echo -e "\n${YELLOW}Tip: Download 'openzone_manager.sh' to configure your device.${NC}"
 fi
