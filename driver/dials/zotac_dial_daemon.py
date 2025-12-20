@@ -47,10 +47,10 @@ print_banner() {
     echo -e "${CYAN}${BOLD}"
     echo "############################################################"
     echo "#                                                          #"
-    echo "#        OPENZONE DRIVER INSTALLER (v2.0)                  #"
+    echo "#        OPENZONE DRIVER INSTALLER (v2.1)                  #"
     echo "#                                                          #"
     echo "#   Target OS:   Bazzite / Fedora Atomic                   #"
-    echo "#   Fixes:       Steam Gaming Mode (Raw HID Access)        #"
+    echo "#   Fixes:       Steam Gaming Mode (Polled HID)            #"
     echo "#                                                          #"
     echo "############################################################"
     echo -e "${NC}"
@@ -69,7 +69,6 @@ echo -e "${YELLOW}${BOLD}IMPORTANT NOTICE:${NC}"
 echo -e "This script installs custom Kernel Drivers and System Services."
 echo -e ""
 echo -e "${RED}DISCLAIMER:${NC} Software provided 'as is'. No warranty."
-echo -e "Developers are not responsible for instability or damage."
 echo -n -e "${GREEN}Do you proceed? [y/N]: ${NC}"
 read -r confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -183,24 +182,25 @@ systemctl enable $SERVICE_NAME > /dev/null
 systemctl restart $SERVICE_NAME
 log_success "Kernel Drivers Active."
 
-# --- Step 6: Install Dial Daemon (HIDRAW FIX) ---
-log_header "Step 6/8: Installing Dial Daemon (Raw Access)..."
+# --- Step 6: Install Dial Daemon (PROVEN WORKING VERSION) ---
+log_header "Step 6/8: Installing Dial Daemon..."
 mkdir -p $DIAL_INSTALL_DIR
 
-# 1. Udev Rule (Still useful for permission safety)
+# 1. Udev Rule
 cat > "/etc/udev/rules.d/99-zotac-zone.rules" <<EOF
 KERNEL=="hidraw*", ATTRS{idVendor}=="1ee9", ATTRS{idProduct}=="1590", MODE="0666"
 EOF
 udevadm control --reload-rules && udevadm trigger
 
-# 2. Generate Python Script (HIDRAW Based)
+# 2. Generate Python Script (Using the Logic you verified works)
 cat << 'EOF' > "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME"
 #!/usr/bin/env python3
-# Zotac Zone Dial Daemon (Raw HID + Backlight Fix)
+# Zotac Zone Dial Daemon (Polled HID + Direct Backlight)
 import os
 import sys
 import glob
 import time
+import select
 import argparse
 from evdev import UInput, ecodes as e
 
@@ -211,10 +211,11 @@ parser.add_argument("--right", default="brightness")
 args = parser.parse_args()
 
 # --- CONSTANTS ---
-VID = "1EE9"
-PID = "1590"
+DIAL_REPORT_ID = 0x03
+VID_PART = "1EE9"
+PID_PART = "1590"
 
-# --- ACTION MAP ---
+# --- ACTIONS ---
 ACTIONS = {
     "volume":            {"type": "key", "up": e.KEY_VOLUMEUP, "down": e.KEY_VOLUMEDOWN},
     "brightness":        {"type": "backlight", "step": 5},
@@ -224,15 +225,15 @@ ACTIONS = {
     "arrows_horizontal": {"type": "key", "up": e.KEY_RIGHT, "down": e.KEY_LEFT},
     "media":             {"type": "key", "up": e.KEY_NEXTSONG, "down": e.KEY_PREVIOUSSONG},
     "page_scroll":       {"type": "key", "up": e.KEY_PAGEUP, "down": e.KEY_PAGEDOWN},
-    "zoom":              {"type": "key", "up": e.KEY_ZOOMIN, "down": e.KEY_ZOOMOUT}, 
+    "zoom":              {"type": "key", "up": e.KEY_ZOOMIN, "down": e.KEY_ZOOMOUT}
 }
 
 # --- HELPERS ---
 def find_backlight():
-    # Prefer amdgpu for handhelds
     paths = glob.glob("/sys/class/backlight/*")
     if not paths: return None
-    paths.sort(key=lambda x: "amdgpu" not in x)
+    for p in paths:
+        if "amdgpu" in p: return p
     return paths[0]
 
 def set_backlight(path, direction, step_pct):
@@ -248,85 +249,94 @@ def set_backlight(path, direction, step_pct):
         
         with open(vf, "w") as f: f.write(str(new_v))
     except Exception as e:
-        print(f"Backlight Err: {e}")
+        print(f"Backlight Error: {e}")
 
-def find_hidraw():
-    for p in glob.glob("/sys/class/hidraw/hidraw*"):
+def find_device():
+    # Robust search matching the working script
+    paths = sorted(glob.glob("/sys/class/hidraw/hidraw*"))
+    for path in paths:
         try:
-            with open(os.path.join(p, "device/uevent"), "r") as f:
-                c = f.read().upper()
-                if f"HID_ID={VID}:{PID}" in c or (f"PRODUCT={VID}/{PID}" in c):
-                    return f"/dev/{os.path.basename(p)}"
+            uevent = os.path.join(path, "device/uevent")
+            if not os.path.exists(uevent): continue
+            with open(uevent, "r") as f:
+                content = f.read().upper()
+                if VID_PART in content and PID_PART in content:
+                    return f"/dev/{os.path.basename(path)}"
         except: continue
     return None
 
 # --- MAIN ---
 def main():
-    print(f"Dial Daemon (Raw). L:{args.left} R:{args.right}")
+    print(f"Daemon Started. Left:{args.left} Right:{args.right}")
     backlight = find_backlight()
-    print(f"Backlight: {backlight}")
+    print(f"Backlight Path: {backlight}")
     
     # Setup UInput
-    cap = {e.EV_KEY: [], e.EV_REL: [e.REL_WHEEL]}
+    keys, rels = [], []
     for a in ACTIONS.values():
-        if a["type"] == "key": cap[e.EV_KEY].extend([a["up"], a["down"]])
-        elif a["type"] == "rel": cap[e.EV_REL].append(a["axis"])
+        if a["type"] == "key": keys.extend([a["up"], a["down"]])
+        elif a["type"] == "rel": rels.append(a["axis"])
         
     try:
-        ui = UInput(cap, name="Zotac Zone Virtual Dials")
-    except:
-        print("UInput Fail. Need root?")
+        ui = UInput({e.EV_KEY: keys, e.EV_REL: rels}, name="Zotac-Zone-Dials")
+    except Exception as err:
+        print(f"UInput Failed: {err}")
         sys.exit(1)
 
     while True:
-        dev_path = find_hidraw()
+        dev_path = find_device()
         if not dev_path:
             time.sleep(3)
             continue
             
-        print(f"Reading {dev_path}...")
+        print(f"Monitoring {dev_path}")
         try:
-            with open(dev_path, "rb") as f:
-                while True:
+            f = open(dev_path, "rb", buffering=0)
+            fd = f.fileno()
+            poller = select.poll()
+            poller.register(fd, select.POLLIN)
+            
+            while True:
+                # Poll with 2s timeout to check connection
+                events = poller.poll(2000)
+                if not events:
+                    # Check if device still exists
+                    if not os.path.exists(dev_path): raise OSError("Disconnected")
+                    continue
+                    
+                try:
                     data = f.read(64)
-                    if not data: break
-                    if len(data) < 4: continue
-                    
-                    # Parse Report
-                    # [0]=ReportID(03) [3]=Trigger
-                    if data[0] != 0x03: continue
-                    trig = data[3]
-                    if trig == 0x00: continue
-                    
-                    # Decode
-                    action_conf = None
-                    direction = None
-                    
-                    if trig == 0x10: action_conf, direction = ACTIONS.get(args.left), "down"
-                    elif trig == 0x08: action_conf, direction = ACTIONS.get(args.left), "up"
-                    elif trig == 0x02: action_conf, direction = ACTIONS.get(args.right), "down"
-                    elif trig == 0x01: action_conf, direction = ACTIONS.get(args.right), "up"
-                    
-                    if not action_conf: continue
-                    
-                    # Execute
-                    atype = action_conf["type"]
-                    if atype == "backlight" and backlight:
-                        set_backlight(backlight, direction, action_conf["step"])
-                    elif atype == "key":
-                        k = action_conf[direction]
+                except: break
+                
+                if not data or len(data) < 4: continue
+                if data[0] != DIAL_REPORT_ID: continue
+                
+                trig = data[3]
+                if trig == 0x00: continue
+                
+                target, direction = None, None
+                if trig == 0x10: target, direction = ACTIONS.get(args.left), "down"
+                elif trig == 0x08: target, direction = ACTIONS.get(args.left), "up"
+                elif trig == 0x02: target, direction = ACTIONS.get(args.right), "down"
+                elif trig == 0x01: target, direction = ACTIONS.get(args.right), "up"
+                
+                if target:
+                    t = target["type"]
+                    if t == "backlight" and backlight:
+                        set_backlight(backlight, direction, target["step"])
+                    elif t == "key":
+                        k = target[direction]
                         ui.write(e.EV_KEY, k, 1)
                         ui.write(e.EV_KEY, k, 0)
                         ui.syn()
-                    elif atype == "rel":
-                        ui.write(e.EV_REL, action_conf["axis"], action_conf[direction])
+                    elif t == "rel":
+                        ui.write(e.EV_REL, target["axis"], target[direction])
                         ui.syn()
-                        
-        except OSError:
-            print("Device disconnected.")
-            time.sleep(2)
-        except Exception as err:
-            print(f"Error: {err}")
+
+        except Exception as e:
+            print(f"Device Loop Error: {e}")
+            try: f.close() 
+            except: pass
             time.sleep(2)
 
 if __name__ == "__main__":
@@ -352,7 +362,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable "$DIAL_SERVICE_NAME" > /dev/null
-log_success "Dial Daemon Installed (Raw HID)."
+log_success "Dial Daemon Installed."
 
 # --- Step 7: Launch Dials ---
 log_header "Step 7/8: Starting Services..."
@@ -416,6 +426,6 @@ if [ -f "$MANAGER_LOCAL_PATH" ]; then
     if [[ ! "$choice" =~ ^[Nn]$ ]]; then
         exec "$MANAGER_LOCAL_PATH"
     else
-        echo -e "\nRun later: ${BOLD}sudo $MANAGER_LOCAL_PATH${NC}"
+        echo -e "\nRun to configure: ${BOLD}sudo $MANAGER_LOCAL_PATH${NC}"
     fi
 fi
