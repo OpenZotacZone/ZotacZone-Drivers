@@ -52,7 +52,7 @@ sudo ./openzone_manager.sh
 ```
 *(If you are in the directory where it was downloaded. If you moved it to a bin folder, just run the command).*
 
-![Installer Interface](/img/openzone_manage.png) 
+![Management Interface](/img/openzone_manager.png) 
 
 ### Manager Features:
 1.  **Back Buttons (M1/M2):** Map them to keys like `Space`, `Enter`, or gamepad buttons like `A`, `B`.
