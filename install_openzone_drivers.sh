@@ -17,11 +17,18 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # --- Configuration ---
-# Updated URL structure based on your feedback
 REPO_RAW_BASE="https://raw.githubusercontent.com/OpenZotacZone/ZotacZone-Drivers/refs/heads/main"
 INSTALL_DIR="/usr/local/lib/zotac-zone"
 BUILD_DIR="/tmp/zotac_zone_build"
 SERVICE_NAME="zotac-zone-drivers.service"
+
+# Dial Configuration
+DIAL_SCRIPT_URL="https://raw.githubusercontent.com/OpenZotacZone/ZotacZone-Drivers/refs/heads/main/driver/dials/zotac_dial_daemon.py"
+DIAL_INSTALL_DIR="/usr/local/bin"
+DIAL_SCRIPT_NAME="zotac_dial_daemon.py"
+DIAL_SERVICE_NAME="zotac-dials.service"
+DIAL_SERVICE_PATH="/etc/systemd/system/$DIAL_SERVICE_NAME"
+MANAGER_SCRIPT="./openzone_manager.sh"
 
 # Local source directory to check (relative to script execution)
 LOCAL_SRC_DIR="./driver"
@@ -38,7 +45,7 @@ print_banner() {
     echo -e "${CYAN}${BOLD}"
     echo "############################################################"
     echo "#                                                          #"
-    echo "#        OPENZONE DRIVER INSTALLER (v1.1)                  #"
+    echo "#        OPENZONE DRIVER INSTALLER (v1.4)                  #"
     echo "#                                                          #"
     echo "#   Target OS:   Bazzite / Fedora Atomic                   #"
     echo "#   Drivers:     flukejones                                #"
@@ -59,13 +66,17 @@ print_banner
 
 # --- Step 1: Cleanup ---
 log_header "Step 1/7: Cleaning up old installations..."
-log_info "Stopping existing services and unloading modules..."
+log_info "Stopping services and unloading modules..."
 
 systemctl stop $SERVICE_NAME 2>/dev/null || true
 systemctl disable $SERVICE_NAME 2>/dev/null || true
 rm -f /etc/systemd/system/$SERVICE_NAME
 
-# Unload modules safely
+systemctl stop $DIAL_SERVICE_NAME 2>/dev/null || true
+systemctl disable $DIAL_SERVICE_NAME 2>/dev/null || true
+rm -f $DIAL_SERVICE_PATH
+
+# Unload modules
 rmmod zotac_zone_platform 2>/dev/null || true
 rmmod zotac_zone_platform_driver 2>/dev/null || true
 rmmod firmware_attributes_class 2>/dev/null || true
@@ -86,86 +97,57 @@ log_info "Detected Kernel: $KERNEL_VER"
 if [ ! -d "/lib/modules/$KERNEL_VER/build" ]; then
     log_error "Kernel headers are missing!"
     echo -e "\n   ${YELLOW}Action Required:${NC}"
-    echo -e "   Please run this command and then reboot your device:"
+    echo -e "   Please run this command and then reboot:"
     echo -e "   ${BOLD}rpm-ostree install kernel-devel-$KERNEL_VER gcc make${NC}"
     exit 1
 fi
-log_success "Kernel headers, gcc, and make are present."
 
-# --- Step 3: Acquire Source ---
-log_header "Step 3/7: Acquiring source code..."
+# Check Python Evdev
+if ! python3 -c "import evdev" &> /dev/null; then
+    log_info "Installing python-evdev..."
+    if command -v rpm-ostree &> /dev/null; then
+        pip install evdev --break-system-packages 2>/dev/null || pip install evdev
+    elif command -v apt &> /dev/null; then
+        apt update && apt install -y python3-evdev
+    else
+        pip install evdev
+    fi
+fi
+
+# Ensure uinput
+modprobe uinput
+echo "uinput" > /etc/modules-load.d/zotac-uinput.conf
+log_success "Prerequisites check passed."
+
+# --- Step 3: Acquire Kernel Source ---
+log_header "Step 3/7: Acquiring Kernel Driver source..."
 mkdir -p $BUILD_DIR
 
-# Define file lists relative to their specific subdirectories
-HID_FILES=(
-    "zotac-zone-hid-core.c"
-    "zotac-zone-hid-rgb.c"
-    "zotac-zone-hid-input.c"
-    "zotac-zone-hid-config.c"
-    "zotac-zone.h"
-)
+HID_FILES=("zotac-zone-hid-core.c" "zotac-zone-hid-rgb.c" "zotac-zone-hid-input.c" "zotac-zone-hid-config.c" "zotac-zone.h")
+PLATFORM_FILES=("zotac-zone-platform.c" "firmware_attributes_class.h" "firmware_attributes_class.c")
 
-PLATFORM_FILES=(
-    "zotac-zone-platform.c"
-    "firmware_attributes_class.h"
-    "firmware_attributes_class.c"
-)
-
-# Logic: Check if local folder './driver' exists and has content
 if [ -d "$LOCAL_SRC_DIR/hid" ] && [ -d "$LOCAL_SRC_DIR/platform" ]; then
-    # --- LOCAL MODE ---
-    log_info "Found local 'driver' folder with hid/platform subdirs."
-    log_info "Using LOCAL files..."
-
-    # Copy HID files
-    for file in "${HID_FILES[@]}"; do
-        cp "$LOCAL_SRC_DIR/hid/$file" "$BUILD_DIR/" 2>/dev/null || { log_error "Missing local file: hid/$file"; exit 1; }
-    done
-
-    # Copy Platform files
-    for file in "${PLATFORM_FILES[@]}"; do
-        cp "$LOCAL_SRC_DIR/platform/$file" "$BUILD_DIR/" 2>/dev/null || { log_error "Missing local file: platform/$file"; exit 1; }
-    done
-
-    log_success "Local source files copied to build directory."
+    log_info "Found local 'driver' folder. Using local files..."
+    for file in "${HID_FILES[@]}"; do cp "$LOCAL_SRC_DIR/hid/$file" "$BUILD_DIR/" 2>/dev/null || { log_error "Missing $file"; exit 1; }; done
+    for file in "${PLATFORM_FILES[@]}"; do cp "$LOCAL_SRC_DIR/platform/$file" "$BUILD_DIR/" 2>/dev/null || { log_error "Missing $file"; exit 1; }; done
+    log_success "Local source copied."
 else
-    # --- DOWNLOAD MODE ---
-    log_info "Local 'driver' folder not found (or incomplete)."
-    log_info "Downloading from OpenZotacZone/ZotacZone-Drivers..."
-
+    log_info "Downloading from OpenZotacZone GitHub..."
     cd $BUILD_DIR
-
-    # Download HID files
-    log_info "Fetching HID drivers..."
-    for file in "${HID_FILES[@]}"; do
-        wget -q "${REPO_RAW_BASE}/driver/hid/$file" || { log_error "Failed to download $file"; exit 1; }
-        echo -ne "."
-    done
+    for file in "${HID_FILES[@]}"; do wget -q "${REPO_RAW_BASE}/driver/hid/$file" || { log_error "Download failed: $file"; exit 1; }; echo -ne "."; done
+    for file in "${PLATFORM_FILES[@]}"; do wget -q "${REPO_RAW_BASE}/driver/platform/$file" || { log_error "Download failed: $file"; exit 1; }; echo -ne "."; done
     echo ""
-
-    # Download Platform files
-    log_info "Fetching Platform drivers..."
-    for file in "${PLATFORM_FILES[@]}"; do
-        wget -q "${REPO_RAW_BASE}/driver/platform/$file" || { log_error "Failed to download $file"; exit 1; }
-        echo -ne "."
-    done
-    echo ""
-    log_success "All source files downloaded successfully."
+    log_success "Download complete."
 fi
 
 # --- Step 4: Compile ---
-log_header "Step 4/7: Compiling drivers..."
-log_info "Building kernel modules..."
-
+log_header "Step 4/7: Compiling Kernel Drivers..."
 cd $BUILD_DIR
 cat > Makefile <<EOF
 obj-m += zotac-zone-hid.o
 zotac-zone-hid-y := zotac-zone-hid-core.o zotac-zone-hid-rgb.o zotac-zone-hid-input.o zotac-zone-hid-config.o
-
-# Build as separate modules to prevent symbol conflicts
 obj-m += firmware_attributes_class.o
 obj-m += zotac-zone-platform.o
-
 all:
 	make -C /lib/modules/\$(shell uname -r)/build M=\$(PWD) modules
 clean:
@@ -179,28 +161,15 @@ else
     exit 1
 fi
 
-# --- Step 5: Install & Security ---
-log_header "Step 5/7: Installing files & Fixing Permissions..."
+# --- Step 5: Install Kernel Drivers ---
+log_header "Step 5/7: Installing Kernel Drivers..."
 mkdir -p $INSTALL_DIR
+cp *.ko $INSTALL_DIR/
 
-log_info "Copying modules to $INSTALL_DIR..."
-cp zotac-zone-hid.ko $INSTALL_DIR/
-cp firmware_attributes_class.ko $INSTALL_DIR/
-cp zotac-zone-platform.ko $INSTALL_DIR/
-
-log_info "Applying SELinux labels..."
+# SELinux Fix
 if command -v chcon &> /dev/null; then
-    if chcon -v -t modules_object_t $INSTALL_DIR/*.ko > /dev/null; then
-        log_success "SELinux labels applied (Permission denied fix)."
-    else
-        log_warn "Failed to apply SELinux labels. Drivers might not load."
-    fi
-else
-    log_warn "SELinux tool 'chcon' not found. Skipping."
+    chcon -v -t modules_object_t $INSTALL_DIR/*.ko > /dev/null 2>&1
 fi
-
-# --- Step 6: Service Creation ---
-log_header "Step 6/7: Configuring auto-start service..."
 
 cat > /etc/systemd/system/$SERVICE_NAME <<EOF
 [Unit]
@@ -209,10 +178,8 @@ After=network.target
 
 [Service]
 Type=oneshot
-# Load kernel dependencies
 ExecStart=/usr/sbin/modprobe led-class-multicolor
 ExecStart=/usr/sbin/modprobe platform_profile
-# Load custom modules in dependency order
 ExecStart=/usr/sbin/insmod ${INSTALL_DIR}/firmware_attributes_class.ko
 ExecStart=/usr/sbin/insmod ${INSTALL_DIR}/zotac-zone-platform.ko
 ExecStart=/usr/sbin/insmod ${INSTALL_DIR}/zotac-zone-hid.ko
@@ -224,28 +191,85 @@ EOF
 
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME > /dev/null
-log_success "Service $SERVICE_NAME created and enabled."
+systemctl restart $SERVICE_NAME
 
-# --- Step 7: Launch ---
-log_header "Step 7/7: Loading drivers..."
-
-if systemctl restart $SERVICE_NAME; then
-    log_success "Drivers loaded successfully!"
+if systemctl is-active --quiet $SERVICE_NAME; then
+    log_success "Kernel Drivers loaded."
 else
-    log_error "Failed to load drivers."
-    echo -e "\n   ${YELLOW}Debug Info:${NC}"
-    journalctl -xeu $SERVICE_NAME --no-pager | tail -n 10
+    log_error "Failed to load Kernel Drivers."
+    journalctl -xeu $SERVICE_NAME --no-pager | tail -n 5
     exit 1
 fi
 
-# Cleanup build
+# --- Step 6: Install Dial Daemon ---
+log_header "Step 6/7: Installing Dial Daemon..."
+mkdir -p $DIAL_INSTALL_DIR
+
+log_info "Downloading Dial Daemon from GitHub..."
+wget -q -O "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME" "$DIAL_SCRIPT_URL"
+
+if [ -f "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME" ]; then
+    chmod +x "$DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME"
+    log_success "Dial Daemon installed."
+else
+    log_error "Failed to download Dial Daemon."
+    exit 1
+fi
+
+log_info "Setting up Service with defaults (Left: Volume, Right: Brightness)..."
+
+cat > "$DIAL_SERVICE_PATH" <<EOF
+[Unit]
+Description=Zotac Zone Dial Daemon
+After=multi-user.target
+
+[Service]
+Type=simple
+# Defaults: Left=Volume, Right=Brightness
+ExecStart=/usr/bin/python3 $DIAL_INSTALL_DIR/$DIAL_SCRIPT_NAME --left volume --right brightness
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable "$DIAL_SERVICE_NAME" > /dev/null
+log_success "Dial Service Installed."
+
+# --- Step 7: Launch Dials ---
+log_header "Step 7/7: Starting Services..."
+systemctl restart "$DIAL_SERVICE_NAME"
+
+if systemctl is-active --quiet "$DIAL_SERVICE_NAME"; then
+    log_success "Dial Service is running!"
+else
+    log_warn "Dial Service failed to start. Check logs."
+fi
+
+# Cleanup
 rm -rf $BUILD_DIR
 
-# --- Final Summary ---
+# --- Summary & Manager Prompt ---
 echo -e "\n${GREEN}============================================================${NC}"
 echo -e "${GREEN}${BOLD}             INSTALLATION COMPLETE!                         ${NC}"
 echo -e "${GREEN}============================================================${NC}"
-echo -e "   ${BOLD}Status:${NC}   Active & Running"
-echo -e "   ${BOLD}Source:${NC}   $(if [ -d "$LOCAL_SRC_DIR/hid" ]; then echo "Local Files"; else echo "OpenZotacZone GitHub"; fi)"
-echo -e "   ${BOLD}Credits:${NC}  Drivers by flukejones | Script by Pfahli"
+echo -e "   ${BOLD}Kernel Drivers:${NC} Active"
+echo -e "   ${BOLD}Dial Service:${NC}   Active (Defaults: Vol/Bright)"
 echo -e "${GREEN}============================================================${NC}"
+
+if [ -f "$MANAGER_SCRIPT" ]; then
+    echo -e "\n${BOLD}${CYAN}Would you like to run the OpenZone Manager now to configure?${NC}"
+    echo -e "This allows you to customize Buttons, RGB, Dials, and Deadzones."
+    echo -n -e "${GREEN}>> Run Manager? [Y/n]: ${NC}"
+    read -r choice
+    if [[ ! "$choice" =~ ^[Nn]$ ]]; then
+        chmod +x "$MANAGER_SCRIPT"
+        exec "$MANAGER_SCRIPT"
+    else
+        echo -e "\nOK. You can run it later via: ${BOLD}sudo $MANAGER_SCRIPT${NC}"
+    fi
+else
+    echo -e "\n${YELLOW}Tip: Run 'sudo ./openzone_manager.sh' to configure your device.${NC}"
+fi
