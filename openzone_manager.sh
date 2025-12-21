@@ -1,16 +1,13 @@
 #!/bin/bash
 # ==============================================================================
-#  OPENZONE MANAGER v1.4
-#  https://github.com/OpenZotacZone/ZotacZone-Drivers/
+#  OPENZONE MANAGER v1.6
 # ==============================================================================
 #  Features:
+#  - Deadzone Fix (Forces Outer Deadzone to 0)
 #  - Dial Configuration (Direct Systemd Service Modification)
 #  - Back Button Mapping (M1/M2)
 #  - Advanced RGB (Hex/Presets/Fix)
-#  - Vibration & Deadzones
-#  - Colorful UI
-# ==============================================================================
-#  Created by Pfahli
+#  - Vibration Control
 # ==============================================================================
 
 # --- Styling & Colors ---
@@ -72,7 +69,7 @@ get_button_status() {
 draw_header() {
     clear
     echo -e "${B_BLUE}╔══════════════════════════════════════════════════════╗${NC}"
-    echo -e "${B_BLUE}║              ${B_WHITE}OPENZONE MANAGER ${B_YELLOW}v1.4${B_BLUE}                  ║${NC}"
+    echo -e "${B_BLUE}║              ${B_WHITE}OPENZONE MANAGER ${B_YELLOW}v1.6${B_BLUE}                  ║${NC}"
     echo -e "${B_BLUE}╚══════════════════════════════════════════════════════╝${NC}"
 }
 
@@ -82,32 +79,21 @@ draw_header() {
 get_dial_state() {
     local side="$1" # "left" or "right"
     if [ ! -f "$DIAL_SERVICE_PATH" ]; then echo "Unknown"; return; fi
-
-    # Grep the ExecStart line, use sed to extract value after --left or --right
     local val=$(grep "ExecStart=" "$DIAL_SERVICE_PATH" | sed -n "s/.*--$side \([^ ]*\).*/\1/p")
-
     if [ -z "$val" ]; then echo "default"; else echo "$val"; fi
 }
 
 update_dial_service() {
     local target_side="$1"
     local new_val="$2"
-
-    # Get current values
     local cur_left=$(get_dial_state "left")
     local cur_right=$(get_dial_state "right")
 
-    # Update target
     if [ "$target_side" == "left" ]; then cur_left="$new_val"; fi
     if [ "$target_side" == "right" ]; then cur_right="$new_val"; fi
 
     echo -e "\n  ${CYAN}Updating Systemd Service...${NC}"
-
-    # Construct new ExecStart line
     local new_line="ExecStart=/usr/bin/python3 $DIAL_SCRIPT_PATH --left $cur_left --right $cur_right"
-
-    # Use sed to replace the line in the file
-    # We use | as delimiter to avoid issues with slashes in paths
     sed -i "s|^ExecStart=.*|$new_line|" "$DIAL_SERVICE_PATH"
 
     echo -e "  ${CYAN}Reloading Daemon...${NC}"
@@ -125,7 +111,6 @@ update_dial_service() {
 configure_single_dial() {
     local side="$1"
     local label="$2"
-
     draw_header
     echo -e "${B_YELLOW}  :: $label CONFIGURATION ::${NC}"
     echo -e "  ──────────────────────────────────────────────────────"
@@ -176,7 +161,6 @@ configure_dials_menu() {
         draw_header
         local l_st=$(get_dial_state "left")
         local r_st=$(get_dial_state "right")
-
         echo -e "${B_YELLOW}  :: RADIAL DIAL CONFIGURATION ::${NC}"
         echo -e "  ──────────────────────────────────────────────────────"
         echo -e "  ${B_WHITE}[1]${NC} Configure ${B_CYAN}Left Dial${NC}   ➜  ${B_GREEN}$l_st${NC}"
@@ -292,13 +276,20 @@ configure_button() {
 configure_deadzones() {
     draw_header
     echo -e "${B_YELLOW}  :: DEADZONES ::${NC}"
-    echo -e "  L-Stick: $(get_clean_val "$HID_PATH/axis_xy_left/deadzone") | R-Stick: $(get_clean_val "$HID_PATH/axis_xy_right/deadzone")"
-    echo -n -e "  ${B_GREEN}>> New Inner Deadzone % (0-100):${NC} "
+    echo -e "  Current (Inner Outer):"
+    echo -e "  L-Stick: $(get_clean_val "$HID_PATH/axis_xy_left/deadzone")"
+    echo -e "  R-Stick: $(get_clean_val "$HID_PATH/axis_xy_right/deadzone")"
+    echo -e "  ──────────────────────────────────────────────────────"
+    echo -e "  ${GRAY}Note: Outer deadzone will be set to 0 (Default/Raw).${NC}"
+    echo -n -e "  ${B_GREEN}>> New Inner Deadzone % (0-20 recommended):${NC} "
     read v
     if [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -le 100 ]; then
-        set_hid_val "$HID_PATH/axis_xy_left/deadzone" "$v 100"
-        set_hid_val "$HID_PATH/axis_xy_right/deadzone" "$v 100"
-        echo -e "  ${B_GREEN}✔ Updated.${NC}"; sleep 1
+        # Force outer deadzone to 0 to fix stick drift issues
+        set_hid_val "$HID_PATH/axis_xy_left/deadzone" "$v 0"
+        set_hid_val "$HID_PATH/axis_xy_right/deadzone" "$v 0"
+        echo -e "  ${B_GREEN}✔ Updated (Inner: $v, Outer: 0).${NC}"; sleep 1
+    else
+        echo -e "  ${B_RED}Invalid input.${NC}"; sleep 1
     fi
 }
 
